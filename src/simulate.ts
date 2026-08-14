@@ -101,6 +101,21 @@ export async function simulate(
       }),
     ],
     allowEmptySignatures: true,
+    // REKEYED ACCOUNTS, and this is not a niche shape: rekeying is how Ledger,
+    // vault and multisig setups are normally arranged. With an unsigned group
+    // algod assumes the authorizer IS the sender, so a rekeyed account fails
+    // validation with "should have been authorized by X but was actually
+    // authorized by Y" — before the group ever reaches the contract.
+    //
+    // Every action routes through a simulate first, so without this such an owner
+    // cannot mint, deposit, withdraw, open, edit, fund or close ANYTHING. The
+    // symptom reads like a permission bug in the passport and belongs entirely to
+    // the request built here.
+    //
+    // Simulation-only: it tells algod to substitute the correct signer where one
+    // is missing, which is exactly the unsigned-simulate case. It changes nothing
+    // for non-rekeyed accounts and nothing at submission.
+    fixSigners: true,
     ...(opts.allowUnnamed ? { allowUnnamedResources: true } : {}),
   });
   const res = await algod.simulateTransactions(req).do();
