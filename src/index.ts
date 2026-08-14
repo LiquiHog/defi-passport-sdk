@@ -49,6 +49,10 @@ export * as version from './version.js';
 export * as deposit from './deposit.js';
 export * as lp from './lp.js';
 export * as note from './note.js';
+// The contract's `log(...)` lines, decoded. Fill history has to come from
+// logs — nothing on chain stores it — and the four strategy fills do NOT
+// share a layout, so a generic reader misreads three of them.
+export * as events from './events.js';
 export * as template from './template.js';
 
 export { RuleType } from './constants.js';
