@@ -48,9 +48,22 @@ import type { Group, Num, PassportCtx } from './types.js';
 const grouped = (txns: Transaction[]): Group =>
   txns.length > 1 ? assignGroupID(txns) : txns;
 
-/** 2500 + 400*(name+value) for a `p`/`cm` box, plus the ASA holding slot. */
+/**
+ * Min-balance a deposit costs the PASSPORT, by the box it creates.
+ *
+ * Every one is `2500 + 400 * (name + value)`, and the value lengths come from the
+ * contract, not from a guess:
+ *
+ *   position  `p`+asset   name 1+8=9,  value 104  ->  47,700
+ *   committed `cm`+asset  name 2+8=10, value 8    ->   9,700
+ *
+ * POSITION_BOX_MBR read 26,100 until a front end measured a real LP deposit at
+ * 157,400 and found the shortfall. That figure implies a name+value of 59 bytes,
+ * which matches no box this contract has ever written.
+ */
 export const ASSET_OPTIN_MBR = 100_000;
-export const POSITION_BOX_MBR = 26_100;
+export const POSITION_BOX_MBR = 47_700;
+export const COMMITTED_BOX_MBR = 9_700;
 
 /**
  * ALGO in. A bare payment — the passport needs no call and no opt-in.
@@ -176,7 +189,27 @@ export function depositLpToken(
  * ALGO, and box min-balance comes out of the same ALGO the quote pools are
  * committed from — so an under-funded passport fails on "insufficient free
  * balance", which reads like a permission problem and is really arithmetic.
+ *
+ * EVERY FLAG DEFAULTS TO "NOT YET PAID", so the answer is the worst case unless
+ * the caller can prove otherwise. Under-reporting causes exactly the revert this
+ * exists to prevent, and the two directions are not symmetrical: being told to
+ * fund 157,400 when 47,700 was needed costs a user nothing, while the reverse
+ * costs them a failed transaction they were told would succeed.
+ *
+ * A first LP deposit of an asset the passport has never held is all three charges,
+ * 100,000 + 47,700 + 9,700 = 157,400. Pass the flags for a repeat deposit, where
+ * the holding slot and both boxes already exist and the marginal cost is zero.
  */
-export function lpDepositAlgoCost(alreadyOptedIn = false): number {
-  return (alreadyOptedIn ? 0 : ASSET_OPTIN_MBR) + POSITION_BOX_MBR;
+export function lpDepositAlgoCost(
+  opts: {
+    alreadyOptedIn?: boolean;
+    positionExists?: boolean;
+    committedExists?: boolean;
+  } = {},
+): number {
+  return (
+    (opts.alreadyOptedIn ? 0 : ASSET_OPTIN_MBR) +
+    (opts.positionExists ? 0 : POSITION_BOX_MBR) +
+    (opts.committedExists ? 0 : COMMITTED_BOX_MBR)
+  );
 }
