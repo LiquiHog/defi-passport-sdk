@@ -7,7 +7,7 @@
  * your transaction lands, and a simulate catches that for free.
  */
 import {
-  encodeUnsignedSimulateTransaction,
+  SignedTransaction,
   modelsv2,
   type Algodv2,
   type Transaction,
@@ -91,7 +91,13 @@ export async function simulate(
   const req = new modelsv2.SimulateRequest({
     txnGroups: [
       new modelsv2.SimulateRequestTransactionGroup({
-        txns: group.map((t) => encodeUnsignedSimulateTransaction(t)) as never,
+        // `SignedTransaction` objects, NOT encoded bytes. algosdk encodes the
+        // request itself, so handing it bytes throws `v.toEncodingData is not a
+        // function` before any network call. An earlier `as never` cast silenced
+        // exactly the type error that was reporting this, which is why it shipped
+        // broken: the compiler knew, and the cast told it not to say so.
+        // `allowEmptySignatures` is what makes an unsigned txn legal here.
+        txns: group.map((txn) => new SignedTransaction({ txn })),
       }),
     ],
     allowEmptySignatures: true,

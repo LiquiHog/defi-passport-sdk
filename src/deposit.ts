@@ -17,6 +17,7 @@
  * changing how it got in.
  */
 import {
+  assignGroupID,
   getApplicationAddress,
   makeAssetTransferTxnWithSuggestedParamsFromObject,
   makePaymentTxnWithSuggestedParamsFromObject,
@@ -26,6 +27,26 @@ import { arc2 } from './note.js';
 import { lock, optIn, setPosition, legs as legsBytes } from './manage.js';
 import { lpDepositNote, lpLegsFromSnapshot, type LpSnapshot } from './lp.js';
 import type { Group, Num, PassportCtx } from './types.js';
+
+/**
+ * Group anything that is more than one transaction, and leave a single one alone.
+ *
+ * A MULTI-TRANSACTION RETURN FROM THIS MODULE IS ALWAYS ATOMIC. Every one of them
+ * documents an order that has to hold — the opt-in before the transfer, the deposit
+ * before the lock — and ungrouped transactions carry no such promise: the node may
+ * accept one and reject another, so the transfer can land against a passport with
+ * no slot for the asset, or the lock against funds that never arrived.
+ *
+ * `create.ts`, `teardown.ts` and `strategy.ts` already grouped what they returned,
+ * so leaving these ungrouped was an inconsistency rather than a decision, and one
+ * that only shows up on a first-time asset deposit.
+ *
+ * DO NOT `assignGroupID` THE RESULT AGAIN. The id is a hash over the group, so
+ * re-assigning yields a different one and the node rejects the lot as an incomplete
+ * group.
+ */
+const grouped = (txns: Transaction[]): Group =>
+  txns.length > 1 ? assignGroupID(txns) : txns;
 
 /** 2500 + 400*(name+value) for a `p`/`cm` box, plus the ASA holding slot. */
 export const ASSET_OPTIN_MBR = 100_000;
@@ -74,7 +95,7 @@ export function depositAsset(
     suggestedParams: ctx.params,
     note: arc2('deposit', { p: ctx.passport, a: a.asset }),
   });
-  return a.withOptIn ? [optIn(ctx, a.asset), xfer] : [xfer];
+  return grouped(a.withOptIn ? [optIn(ctx, a.asset), xfer] : [xfer]);
 }
 
 /**
@@ -144,7 +165,7 @@ export function depositLpToken(
       legs: legsBytes(legA, legB),
     }),
   );
-  return g;
+  return grouped(g);
 }
 
 /**

@@ -93,8 +93,9 @@ export async function boxValue(
   try {
     const box = await algod.getApplicationBoxByName(BigInt(app), name).do();
     return box.value;
-  } catch {
-    return null;
+  } catch (e) {
+    if (absent(e)) return null;
+    throw e;
   }
 }
 
@@ -327,6 +328,26 @@ export async function boundsHealth(
   return { chainTs, rules };
 }
 
+/**
+ * Is this error the box simply not existing, or did we fail to find out?
+ *
+ * A 404 means ABSENT, which is a normal answer: an unregistered owner, an address
+ * with no beta entry, a line with no head. Anything else — a 429, a timeout, a node
+ * failing over — means the question went unanswered.
+ *
+ * REPORTING THE SECOND AS THE FIRST IS THE DANGEROUS DIRECTION. A rate-limited read
+ * that returns null tells someone who owns a passport that they have none, and the
+ * obvious response is to create one, which `create_entry` refuses because a live
+ * passport already exists. So they get an error on an account they now believe is
+ * broken, from a transaction they should never have been offered.
+ */
+function absent(e: unknown): boolean {
+  const status =
+    (e as { status?: number })?.status ??
+    (e as { response?: { status?: number } })?.response?.status;
+  return status === 404;
+}
+
 export async function findPassport(
   algod: Algodv2,
   registry: Num,
@@ -336,8 +357,9 @@ export async function findPassport(
   try {
     const box = await algod.getApplicationBoxByName(BigInt(registry), name).do();
     return readU64(box.value, 0);
-  } catch {
-    return null; // 404 = no registration
+  } catch (e) {
+    if (absent(e)) return null; // no registration
+    throw e;
   }
 }
 
@@ -355,8 +377,9 @@ export async function ownerOf(
   try {
     const box = await algod.getApplicationBoxByName(BigInt(registry), name).do();
     return encodeAddress(box.value);
-  } catch {
-    return null; // not linked — the keeper cannot crank it
+  } catch (e) {
+    if (absent(e)) return null; // not linked — the keeper cannot crank it
+    throw e;
   }
 }
 
