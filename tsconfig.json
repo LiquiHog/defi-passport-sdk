@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "//": [
+    "rootDir is `src`, and `include` is src ONLY, because tsc roots its output at",
+    "the common ancestor of every input. With examples/ in scope that ancestor was",
+    "the repo, so the emit landed at dist/src/index.js while package.json pointed at",
+    "dist/index.js. Importing by package name failed with 'Cannot find module', and",
+    "nothing in the build said so — tsc and the typecheck were both clean.",
+    "",
+    "examples/ is STILL type-checked, by tsconfig.check.json, which is what",
+    "`npm run typecheck` runs. Removing them here changes what is emitted, not what",
+    "is verified.",
+    "",
+    "lib includes DOM for `crypto.subtle` and `atob`. Both are equally standard in",
+    "Node 18+, but their type declarations live in the DOM lib, not in @types/node."
+  ],
+  "include": ["src/**/*.ts"]
+}
