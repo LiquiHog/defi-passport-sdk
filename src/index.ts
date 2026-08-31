@@ -23,7 +23,7 @@
  *
  * ## Where to start
  *
- *   read.entitled           which version an address may install, if any
+ *   read.entitled           which LINE and version an address may install, if any
  *   programs.buildForVersion   the program bytes that version expects
  *   createPassport          the creation group
  *   deposit / strategy      fund it, then give it something to do
@@ -35,6 +35,10 @@ export * from './types.js';
 export * as abi from './abi.js';
 export * as encode from './encode.js';
 export * as read from './read.js';
+// The entitlement derivation, without the network. `read.entitled` is the
+// wrapper you normally want; these are what you test against, and what a
+// harness driving a half-migrated registry needs in order to force a shape.
+export * as entitlement from './entitlement.js';
 export * as directory from './directory.js';
 export * from './create.js';
 export * as strategy from './strategy.js';
@@ -54,5 +58,8 @@ export * as note from './note.js';
 // share a layout, so a generic reader misreads three of them.
 export * as events from './events.js';
 export * as template from './template.js';
+// Owner-driven swaps. Trading from inside the passport with no keeper involved,
+// so no keeper fee — and the session blob's reference arrays handled for you.
+export * as swap from './swap.js';
 
 export { RuleType } from './constants.js';

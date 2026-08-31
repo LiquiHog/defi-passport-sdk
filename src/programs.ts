@@ -7,10 +7,15 @@
  * re-hashes the pages inside the group, and anything that does not match is
  * refused. The registry stores only hashes, never bytes, so they are bundled here.
  *
- * TWO BUILDS SHIP, because two programs are live at once: a RESTRICTED build for
- * the public tier and a FULL build for beta. Handing a public owner the full bytes
- * fails the page-hash check and their creation is refused, so choosing correctly
- * is not cosmetic.
+ * FOUR BUILDS SHIP, across two tiers AND two eras. The tier split is the obvious
+ * one: a RESTRICTED build for the public and a FULL build for beta, and handing a
+ * public owner the full bytes fails the page-hash check, so choosing correctly is
+ * not cosmetic. The era split is the one that surprises people — an approved
+ * version can never be un-approved, so v1.0.0 and v1.1.0 stay installable
+ * alongside v1.0.1 and v1.1.1 and owners upgrade whenever they like.
+ *
+ * Which means a passport you are asked to explain a failure for may be running any
+ * of the four, and `assertMessages` is NOT interchangeable between them.
  *
  * Choose by ASKING THE REGISTRY. `buildForVersion` reads the hash the registry
  * stored for that version and returns whichever bundled build matches. A local
@@ -35,11 +40,25 @@ import type { Num } from './types.js';
 const b64 = (s: string): Uint8Array =>
   Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-export type BuildLabel = 'full' | 'restricted';
+/** Which tier a build serves. The public tier gets `restricted`. */
+export type BuildTier = GeneratedBuild['tier'];
+
+/**
+ * `tier@version`, naming the release a build was CUT as.
+ *
+ * The union comes from the generated file, so adding a build there extends this
+ * automatically and every exhaustive switch stops compiling until it is handled.
+ * The version in the name is an identifier, NOT a lookup key — the same bytes can
+ * be approved under many version numbers, which is why `buildForVersion` asks the
+ * registry by hash instead of indexing anything by version.
+ */
+export type BuildLabel = keyof typeof GENERATED;
 
 export interface Build {
-  /** Which build this is. `restricted` is the public v1.0.0 tier. */
+  /** Which build this is, as `tier@version`. */
   readonly label: BuildLabel;
+  /** The tier alone, when the era does not matter. */
+  readonly tier: BuildTier;
   readonly approval: Uint8Array;
   readonly clear: Uint8Array;
   /** The page-hash the registry stores for this program. */
@@ -48,29 +67,43 @@ export interface Build {
    * pc -> the SOURCE message of the assert that failed, FOR THIS BUILD ONLY.
    *
    * The AVM's `assert` carries no string, so a node reports only `assert failed
-   * pc=N`. The two builds' maps are NOT interchangeable: of 250 entries only 97
-   * pcs are shared and NINE of those disagree, so the wrong map returns nothing
-   * for most failures and a confident WRONG assert name for nine of them. Resolve
-   * through the build you actually submitted.
+   * pc=N`. The four maps are NOT interchangeable. Across all four there are 788
+   * distinct pcs and only FIVE appear in every map, so the wrong map usually
+   * returns nothing — and where it does return something it can be confidently
+   * wrong. pc 621 is "check self.owner exists" on both 1.0.0/1.1.0 builds and
+   * "version mismatch" on both 1.0.1/1.1.1 builds.
+   *
+   * Resolve through the build you actually submitted. `buildForVersion` gets it
+   * from the passport's own version without you having to choose.
    */
   readonly assertMessages: Readonly<Record<number, string>>;
 }
 
-const materialise = (label: BuildLabel, g: GeneratedBuild): Build => ({
-  label,
-  approval: b64(g.approvalB64),
-  clear: b64(g.clearB64),
-  pageHash: g.pageHash,
-  assertMessages: g.assertMessages,
-});
-
-export const BUILDS: Readonly<Record<BuildLabel, Build>> = {
-  full: materialise('full', GENERATED.full),
-  restricted: materialise('restricted', GENERATED.restricted),
+const materialise = (label: BuildLabel): Build => {
+  const g: GeneratedBuild = GENERATED[label];
+  return {
+    label,
+    tier: g.tier,
+    approval: b64(g.approvalB64),
+    clear: b64(g.clearB64),
+    pageHash: g.pageHash,
+    assertMessages: g.assertMessages,
+  };
 };
 
+/**
+ * Every bundled build, by label.
+ *
+ * There is deliberately no `BUILDS.full` shortcut any more. Two builds now answer
+ * to "full", from different eras, and the whole failure this guards against is
+ * picking one of them by habit — so the choice has to be written down.
+ */
+export const BUILDS: Readonly<Record<BuildLabel, Build>> = Object.fromEntries(
+  (Object.keys(GENERATED) as BuildLabel[]).map((label) => [label, materialise(label)]),
+) as Readonly<Record<BuildLabel, Build>>;
+
 /** Every bundled build, for callers that must search rather than choose. */
-export const ALL_BUILDS: readonly Build[] = [BUILDS.restricted, BUILDS.full];
+export const ALL_BUILDS: readonly Build[] = Object.values(BUILDS);
 
 async function storedHashes(
   algod: Algodv2,

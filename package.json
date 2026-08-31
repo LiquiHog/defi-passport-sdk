@@ -2,7 +2,7 @@
   "name": "@liquihog/defi-passport-sdk",
   "private": true,
   "version": "0.1.0",
-  "description": "TypeScript SDK for LiquiHog DeFi Passport \u2014 create and manage a passport.",
+  "description": "TypeScript SDK for LiquiHog DeFi Passport — create and manage a passport.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,8 +13,10 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "prepare": "tsc"
+    "typecheck": "tsc && tsc -p tsconfig.test.json",
+    "prepare": "tsc",
+    "test": "tsc && node --test --experimental-strip-types test/entitlement.test.ts test/gascap.test.ts test/programs.test.ts test/swap.test.ts",
+    "live-check": "tsc && node scripts/live-check.mjs"
   },
   "dependencies": {
     "algosdk": "3.6.0"

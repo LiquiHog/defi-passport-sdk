@@ -68,6 +68,16 @@ export function format(version: Num): string {
 export const majorOf = (version: Num): number => Number(BigInt(version) / MAJOR_MUL);
 
 /**
+ * The LINE a version belongs to on a MIGRATED registry: `major * 1000 + minor`.
+ *
+ * Only meaningful after the step-0 split. Before it a line IS the major and
+ * `majorOf` is the right function — which is precisely why neither is safe to
+ * reach for without knowing which shape the registry is in. `read.entitled`
+ * returns the line it resolved; prefer that over recomputing one here.
+ */
+export const lineOf = (version: Num): number => Number(BigInt(version) / MINOR_MUL);
+
+/**
  * Would moving from `from` to `to` be accepted as an IN-PLACE update?
  *
  * Mirrors the passport's two guards: forward only, and never across a major.

@@ -27,7 +27,6 @@ import {
   REG_BOX,
 } from './constants.js';
 import { addrBox, boxName, u64 } from './encode.js';
-import { majorOf } from './version.js';
 import type { Group, Num } from './types.js';
 import { arc2 } from './note.js';
 
@@ -44,11 +43,18 @@ export interface CreateArgs {
   approvalProgram: Uint8Array;
   clearProgram: Uint8Array;
   /**
-   * From `read.entitled`. `create_entry` derives the version itself, but box
-   * references are named at signing time, so both are needed here to name
-   * `h`+major and `v`+version.
+   * From `read.entitled` — the LINE it resolved, NOT a major.
+   *
+   * `create_entry` derives the version itself, but box references are named at
+   * SIGNING time, so both of these are needed here to name `h`+line and
+   * `v`+version.
+   *
+   * DO NOT COMPUTE THIS FROM A VERSION. Before the step-0 migration a line is
+   * the major; after it a line is `major * 1000 + minor`. A version number
+   * cannot tell you which shape the registry is in, and the wrong one fails the
+   * group on a BOX REFERENCE — which reads like a permissions bug and is not.
    */
-  entitledMajor: Num;
+  entitledLine: Num;
   entitledVersion: Num;
   /**
    * The app id this owner's index currently names, from `read.findPassport`, or
@@ -115,7 +121,7 @@ export function createGroup(a: CreateArgs): Group {
       { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
       { appIndex: registry, name: boxName(REG_BOX.version, a.entitledVersion) },
       { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, a.entitledMajor) },
+      { appIndex: registry, name: boxName(REG_BOX.head, a.entitledLine) },
     ],
     ...(a.previousPassport ? { foreignApps: [Number(a.previousPassport)] } : {}),
   });
@@ -146,6 +152,12 @@ export function linkGroup(a: {
   registry: Num;
   passport: Num;
   version: Num;
+  /**
+   * The line from `read.entitled`, NOT `majorOf(version)`. `link_passport`
+   * re-runs the tier gate, so it must name the SAME head box the creation named,
+   * and the two shapes of that name cannot be told apart from a version number.
+   */
+  line: Num;
   params: SuggestedParams;
 }): Group {
   const registry = BigInt(a.registry);
@@ -173,7 +185,7 @@ export function linkGroup(a: {
       // boxes too. Missing them reads as "invalid Box reference", not as a
       // permission error.
       { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, majorOf(a.version)) },
+      { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
     ],
   });
 
@@ -192,6 +204,11 @@ export function upgradeGroup(a: {
   registry: Num;
   passport: Num;
   version: Num;
+  /**
+   * The line from `read.entitled` for the owner being upgraded, not a major.
+   * `verify_update` re-runs the tier gate and reads the head box for beta.
+   */
+  line: Num;
   approvalProgram: Uint8Array;
   clearProgram: Uint8Array;
   params: SuggestedParams;
@@ -214,7 +231,7 @@ export function upgradeGroup(a: {
     boxes: [
       { appIndex: registry, name: boxName(REG_BOX.version, a.version) },
       { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, majorOf(a.version)) },
+      { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
     ],
   });
   return assignGroupID([update, verify]);

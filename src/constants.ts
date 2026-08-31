@@ -65,26 +65,48 @@ export const REG_BOX = {
   passport: 'a', //a + app_id  reverse index; the keeper discovers work from it
   version: 'v', // v + version approved page hashes + timelock
   beta: 'w', //    w + address present = beta tier
-  head: 'h', //    h + major   the newest version approved in that LINE
+  head: 'h', //    h + line    the newest version approved in that LINE
 } as const;
 
 /**
- * Version access is by LINE, and the two tiers resolve differently:
+ * The globals that decide which version an address may install.
  *
- *   beta (`w`+address) -> `h`+major, the newest patch in the line it asks for
- *   everyone else      -> `stable_version`, one pinned version that MAY LAG
+ * Access is by LINE, and the two tiers do NOT resolve symmetrically:
  *
- * That lag is the feature. It lets one version be the public release while a newer
- * one is beta-tested in the same line, and because the major does not change,
- * promoting it reaches existing owners as an in-place upgrade rather than a
- * migration. `min_major` retires a line outright.
+ *   beta (`w`+address, or the manager) -> `beta_line`, then `h`+that line
+ *   everyone else                      -> `stable_version` EXACTLY, no head box
  *
- * Each tier still resolves to exactly one version, so there is no range to choose
- * from and a superseded version stops being installable the moment stable moves.
+ * Stable being PINNED rather than headed is the point, and it is the launch shape
+ * rather than an edge case. It lets one version be the public release while a
+ * newer one is beta-tested in the same major, and because the major does not
+ * change, promoting it later reaches existing owners as an in-place upgrade
+ * rather than a migration. Each tier still resolves to exactly one version, so
+ * there is no range to choose from and a superseded version stops being
+ * installable the moment stable moves.
  *
- * Use `read.entitled` rather than reading these yourself.
+ * WHAT A LINE IS depends on whether the step-0 migration has run: a major before
+ * it, `major * 1000 + minor` after, so v1.0.x and v1.1.x go from sharing one head
+ * box to having their own. `beta_line` exists only on a migrated registry, which
+ * is what makes its presence the shape signal; `latest_major` is live on BOTH and
+ * signals nothing about which shape you are looking at.
+ *
+ * `min_major` spans both shapes unchanged and stays MAJOR-granular either way —
+ * `line // 1000 >= min_major` once migrated — so retiring a major retires all of
+ * its minor lines at once. Retirement deliberately did not become minor-granular.
+ *
+ * DO NOT read `stable_major`. An older build wrote it and a newer one stopped, so
+ * it still answers on any registry that ever ran the old build, frozen at
+ * whatever it last held and reading as perfectly live. Derive stable's line from
+ * `stable_version` instead.
+ *
+ * Use `read.entitled` rather than reading any of these yourself.
  */
-export const LINE_GLOBALS = ['latest_major', 'stable_version', 'min_major'] as const;
+export const LINE_GLOBALS = [
+  'latest_major',
+  'beta_line',
+  'stable_version',
+  'min_major',
+] as const;
 
 export enum RuleType {
   Schedule = 1,
@@ -113,6 +135,49 @@ export const MAX_ANCHORS = 4;
  * spend. The contract does not validate this field, so it is entirely your choice.
  */
 export const UNLIMITED_REFUND_BUDGET = 18446744073709551615n;
+
+/**
+ * The per-crank gas refund ceiling, counted in TRANSACTIONS.
+ *
+ * 272 is the protocol's group maximum — 256 inner transactions plus 16 at the
+ * top level — so it is not a tunable somebody forgot to raise. There is no group
+ * larger than this, which is why the contract refuses a higher cap with "beyond
+ * protocol group maxima".
+ *
+ * THE DEFAULT AND THE MAXIMUM ARE THE SAME NUMBER, deliberately. An unset cap
+ * already sits at the ceiling, so `set_gas_cap` can only ever TIGHTEN — neither
+ * an owner nor the platform can raise exposure past one group's worth without
+ * every owner signing a new version.
+ *
+ * This bounds a RATE, not a total: how big one crank's refunded call tree may
+ * get. Lifetime exposure is still the per-strategy `refund_budget` and the
+ * passport's gas reserve, both owner-set and untouched by this.
+ *
+ * A stored `0` MEANS UNSET and resolves to this default. It does not mean "no
+ * gas allowed" — see `read.gasCap`, which resolves it for you.
+ */
+export const GAS_CAP_MAX = 272;
+export const GAS_CAP_DEFAULT = 272;
+
+/**
+ * The first version ON EACH LINE that has `set_gas_cap`, keyed by line.
+ *
+ * A TABLE, reluctantly, and the only one in this SDK — because neither of the
+ * alternatives works. It cannot be derived from the version number: step 1 ships
+ * v1.0.1 and v1.1.1, so a plain `version >= 1_000_001` would claim v1.1.0
+ * (1_001_000, numerically larger) has the method when it does not. And it cannot
+ * be probed from state either, because `gas_cap` is absent both on a passport
+ * too old to have the method and on a new one whose owner never set a cap.
+ *
+ * A line that is not listed reads as UNSUPPORTED rather than assumed. That is
+ * the conservative direction: the cost of being wrong is a control hidden from
+ * an owner who could have used it, against an "unknown method" rejection at
+ * signing time. Add a line here when one ships with the method.
+ */
+export const GAS_CAP_SINCE: Readonly<Record<number, bigint>> = {
+  1_000: 1_000_001n, // v1.0.1, the restricted line
+  1_001: 1_001_001n, // v1.1.1, the full line
+};
 
 /** An app account cannot hold ALGO at all below this. */
 export const APP_MIN_BALANCE = 100_000;

@@ -22,7 +22,7 @@ export interface SimResult {
   reason?: string;
   app?: number;
   pc?: number;
-  /** Set when the bundled builds disagree on this pc — pass a `build`. */
+  /** Set when the bundled maps disagree on this pc — pass a `build`. */
   ambiguous?: true;
   /** Per-transaction opcode budget consumed — useful for spotting a tight group. */
   budgets: number[];
@@ -37,12 +37,18 @@ export interface SimResult {
  * registry, the router or the oracle has its own program and its own pcs, and
  * looking those up here would produce a confident wrong answer.
  *
- * PASS THE BUILD YOU SUBMITTED. The full and restricted passports have different
- * maps — of 250 entries only 97 pcs are shared and NINE of those disagree — so the
- * wrong map does not merely fail to help, it names a guard that did not fire.
- * Without a build this answers only where every bundled map AGREES and reports
- * `ambiguous` otherwise, because the entire purpose of this function is to be
- * believed, and silence beats a plausible lie.
+ * PASS THE BUILD YOU SUBMITTED. Four builds are live — two tiers across two eras
+ * — and their maps differ: 788 distinct pcs, of which 41 carry more than one
+ * meaning. The wrong map does not merely fail to help, it names a guard that did
+ * not fire. `programs.buildForVersion(algod, registry, state.version)` resolves
+ * the right one from the passport itself.
+ *
+ * Without a build this answers only where every bundled map that HAS the pc
+ * agrees, and reports `ambiguous` otherwise. That is why all four builds stay
+ * bundled even though only two are installable today: 23 pcs agree within each
+ * era and disagree across them, so dropping the old pair would make those answer
+ * confidently and wrongly for every passport that has not upgraded yet. Silence
+ * beats a plausible lie, and the older maps are what buy the silence.
  */
 export function explain(
   failure: string,
@@ -144,8 +150,8 @@ export async function simulateOrThrow(
       r.reason
         ? `refused by: ${r.reason} (app ${r.app}, pc ${r.pc})`
         : r.ambiguous
-          // Two bundled builds disagree on this pc. Naming either would be a
-          // guess, so give the caller the pc and tell them to pass a build.
+          // The bundled builds disagree on this pc. Naming any of them would be
+          // a guess, so give the caller the pc and tell them to pass a build.
           ? `refused at app ${r.app} pc ${r.pc} — the bundled builds disagree on ` +
             `this pc; pass { build } to resolve it`
           : `simulate failed: ${r.failure}`,

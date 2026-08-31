@@ -38,6 +38,15 @@ export interface PassportState {
   directory: bigint;
   routerAppId: bigint;
   budgetAppId: bigint;
+  /**
+   * The per-crank refund ceiling, RAW.
+   *
+   * 0 means UNSET, which resolves to `GAS_CAP_DEFAULT` — the opposite of "no gas
+   * allowed". It also reads 0 on any passport too old to have the field at all.
+   * Use `read.gasCap`, which tells those two apart and applies the registry's
+   * brake, rather than surfacing this number directly.
+   */
+  gasCap: bigint;
 }
 
 /** A strategy header (`s`+sid, 64 B). */

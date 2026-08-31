@@ -36,6 +36,8 @@ export const PASSPORT = {
   add_reserve: m('add_reserve(uint64,uint64)void'),
   remove_reserve: m('remove_reserve(uint64,uint64)void'),
   set_refund_budget: m('set_refund_budget(uint64,uint64)void'),
+  // the passport-wide ceiling on what one crank may refund
+  set_gas_cap: m('set_gas_cap(uint64)void'),
   // owner-driven swap, and the keeper's entry point
   swap: m('swap(uint64,uint64,uint64,uint64,byte[])uint64'),
   ping: m('ping()void'),

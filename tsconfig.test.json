@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": "."
+  },
+  "//": [
+    "Type-checks the TESTS, which the build config cannot: its `include` is src",
+    "only, because `rootDir` roots the emit at the common ancestor of every input",
+    "and test/ in scope would move dist/ under a directory package.json does not",
+    "point at.",
+    "",
+    "Tests import from dist/ rather than src/, so this needs a build first — which",
+    "is why `typecheck` and `test` both run `tsc` before it. Checking them against",
+    "the emitted .d.ts is the point: it is the surface consumers actually get."
+  ],
+  "include": ["test/**/*.ts"]
+}

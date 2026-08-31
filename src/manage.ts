@@ -5,7 +5,7 @@ import {
   type Transaction,
 } from 'algosdk';
 import { PASSPORT } from './abi.js';
-import { BOX, OPTIN_FEE } from './constants.js';
+import { BOX, GAS_CAP_MAX, OPTIN_FEE } from './constants.js';
 import { abiBytes, boxName, concat, u64 } from './encode.js';
 import { flat } from './create.js';
 import type { Num, PassportCtx } from './types.js';
@@ -200,4 +200,36 @@ export function syncContracts(
   return call(ctx, PASSPORT.sync_contracts, [], {
     apps: [a.directory, a.router, a.budget],
   });
+}
+
+/**
+ * Cap what ONE crank may refund, in transactions. Owner-signed, no boxes.
+ *
+ * This bounds a RATE — the size of a single refunded call tree — not a total.
+ * Lifetime exposure is still the per-strategy `refund_budget` and the passport's
+ * gas reserve, both owner-set and untouched by this.
+ *
+ * `0` IS A RESET, not a shutdown: it stores "unset", which resolves to 272. Do
+ * not offer it as a way to switch automation off, because it is the opposite.
+ *
+ * The registry's `crank_txn_budget` can only LOWER this, never raise it, so the
+ * number an owner sets here is a ceiling on their own exposure and nothing else
+ * can widen it. `read.gasCap` reports what actually binds.
+ *
+ * The 272 bound is checked HERE as well as on chain because the AVM's assert
+ * carries no message: on chain this arrives as a bare `assert failed pc=N`, and
+ * "beyond protocol group maxima" only reappears through `simulate.explain`.
+ *
+ * NEW IN v1.0.1 AND v1.1.1. On an older passport this selector does not exist and
+ * the call is rejected as an unknown method — check `read.gasCap().supported`
+ * before putting the control in front of an owner.
+ */
+export function setGasCap(ctx: PassportCtx, txns: Num): Transaction {
+  if (BigInt(txns) > BigInt(GAS_CAP_MAX)) {
+    throw new RangeError(
+      `gas cap ${txns} exceeds the protocol group maximum of ${GAS_CAP_MAX} ` +
+        `(256 inner + 16 top-level) — the contract refuses anything above it`,
+    );
+  }
+  return call(ctx, PASSPORT.set_gas_cap, [u64(txns)]);
 }

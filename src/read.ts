@@ -9,8 +9,21 @@
  *    the whole of what `withdraw` will allow.
  */
 import { encodeAddress, getApplicationAddress, type Algodv2 } from 'algosdk';
-import { BOX, REG_BOX, RuleType } from './constants.js';
+import {
+  BOX,
+  GAS_CAP_DEFAULT,
+  GAS_CAP_SINCE,
+  REG_BOX,
+  RuleType,
+} from './constants.js';
 import { addrBox, boxName, readU64 } from './encode.js';
+import {
+  resolveLine,
+  resolveVersion,
+  type Entitlement,
+  type RegistryShape,
+} from './entitlement.js';
+import { lineOf } from './version.js';
 import type { Num, PassportState, Position, Rule, Strategy } from './types.js';
 
 const TXT = new TextDecoder();
@@ -42,7 +55,76 @@ export async function passportState(algod: Algodv2, app: Num): Promise<PassportS
     directory: asU(g, 'directory'),
     routerAppId: asU(g, 'router_app_id'),
     budgetAppId: asU(g, 'budget_app_id'),
+    gasCap: asU(g, 'gas_cap'),
   };
+}
+
+export interface GasCap {
+  /** The owner's own ceiling, with a stored 0 already resolved to the default. */
+  cap: number;
+  /** No cap of its own: `cap` is the protocol default rather than a choice. */
+  isDefault: boolean;
+  /**
+   * Whether this passport's version HAS `set_gas_cap` at all.
+   *
+   * False is not "the owner declined to set one" — it is "the method does not
+   * exist here", and building the call anyway gets it rejected as unknown.
+   */
+  supported: boolean;
+  /** The registry's `crank_txn_budget`. 0 means it is not braking at all. */
+  brake: number;
+  /** What actually binds a crank: the owner's cap, lowered by the brake. */
+  effective: number;
+}
+
+/**
+ * The gas cap, resolved — which takes BOTH apps, because neither number alone is
+ * the answer.
+ *
+ * Two different zeros meet here and neither means what it looks like. A stored
+ * `gas_cap` of 0 means UNSET and resolves to 272; a `crank_txn_budget` of 0 means
+ * the registry is NOT braking, not that it has clamped cranks to nothing. Read
+ * either literally and you report a passport that cannot crank when in fact it is
+ * running wide open.
+ *
+ * The registry's budget may only LOWER an owner's cap, never raise it, so
+ * `effective` is the smaller of the two and is what a crank is actually held to.
+ *
+ * Pass `state` if you already hold one — a UI that has called `passportState`
+ * should not pay for it twice. The registry comes from the passport's own
+ * immutable binding, so this cannot be pointed at the wrong one.
+ */
+export async function gasCap(
+  algod: Algodv2,
+  passport: Num,
+  opts: { state?: PassportState } = {},
+): Promise<GasCap> {
+  const st = opts.state ?? (await passportState(algod, passport));
+  const rg = st.registry === 0n ? {} : await globals(algod, st.registry);
+  return resolveGasCap(st, asU(rg, 'crank_txn_budget'));
+}
+
+/**
+ * The same resolution, given both numbers — pure, and the part worth testing.
+ *
+ * `brake` is the registry's `crank_txn_budget`. Both inputs have a zero that
+ * means the opposite of what it reads as, and this is the only place that
+ * knows it.
+ */
+export function resolveGasCap(st: PassportState, brake: Num): GasCap {
+  const isDefault = st.gasCap === 0n;
+  const cap = isDefault ? GAS_CAP_DEFAULT : Number(st.gasCap);
+
+  // Version 0 means UNATTESTED — `confirm_version` has not run yet — which is
+  // not a version that can be compared against anything. See `create.linkGroup`.
+  //
+  // The lookup is BY LINE, not a `>=` against one number: v1.1.0 is 1_001_000 and
+  // numerically larger than v1.0.1's 1_000_001, but it predates the method.
+  const since = st.version === 0n ? undefined : GAS_CAP_SINCE[lineOf(st.version)];
+  const supported = since !== undefined && st.version >= since;
+
+  const b = Number(BigInt(brake));
+  return { cap, isDefault, supported, brake: b, effective: b > 0 ? Math.min(cap, b) : cap };
 }
 
 /** Every box, name -> value. Follows pagination; a passport can hold many. */
@@ -390,63 +472,54 @@ export async function ownerOf(
  * needs on its first screen: whether this address may create a passport at all,
  * which version it would get, and whether it is on the beta tier.
  *
- * Two steps, because access is granted by LINE rather than by version. The tier
- * picks a major — the newest line for a beta address, stable's own major for
- * everyone else — and the registry returns that line's newest approved patch.
+ * THIS RETURNS A LINE, NOT A MAJOR, and the difference is not cosmetic. Before
+ * the step-0 migration a line IS a major; after it a line is `major * 1000 +
+ * minor`, so v1.0.x and v1.1.x stop sharing a head box. `line` is the head-box
+ * key either way — hand it straight to `createGroup`, `linkGroup` and
+ * `upgradeGroup` and never recompute it from a version number, because the two
+ * shapes are indistinguishable from a version alone.
  *
- * THE MANAGER IS ALWAYS ON THE BETA TIER and never has a beta box, so it is
- * checked separately. Skipping that check does not merely lose an edge case: while
- * a registry is in closed beta with no public version pinned, the manager is the
- * only address entitled to anything, and you would report "no line open" for the
- * one address that can in fact create.
+ * Two network reads, never a scan: the registry's globals, and the `w` box for
+ * this address. The manager is settled from globals alone and costs no box read
+ * at all. Doing this through `boxes()` cost 1 + N round trips and grew with every
+ * passport ever created — on the first screen a visitor sees. See `boxValue`.
  *
- * Stable's major is DERIVED from the version number rather than read from a
- * global. An older registry build stored it separately, and that key still answers
- * on any registry that ever ran that build — an upgrade does not clear globals the
- * new code stopped writing, so it sits at a stale value and reads as perfectly
- * live. Deriving is the only way to match what will actually be enforced.
+ * A THIRD read happens only for beta, because only beta resolves through a head
+ * box. Stable is PINNED to `stable_version` and reads no head box at all, which
+ * is also why naming a stable owner the wrong head box is inert on chain while
+ * naming a beta owner the wrong one is not.
  *
- * You need the result even though `create_entry` derives its own: box references
- * are named at SIGNING time, so the creation group has to name the boxes for this
- * major and version. Guessing wrong surfaces as "invalid Box reference", not as a
- * passport created on the wrong line.
+ * The derivation itself lives in `entitlement.ts` and is pure. If you are
+ * checking behaviour — the `min_major` boundary, the manager short-circuit,
+ * either registry shape — test `resolveLine` directly rather than standing up a
+ * registry to reach it through here.
  *
- * Returns `{ major: 0, version: 0n }` when no line is open to this address — say
- * so in the UI rather than letting the create fail on chain.
+ * Returns `{ line: 0, version: 0n }` when no line is open to this address — say
+ * so in the UI rather than letting the create fail on chain. Throws only when the
+ * app is not a version registry at all; see `detectShape`.
  */
 export async function entitled(
   algod: Algodv2,
   registry: Num,
   who: string,
-): Promise<{ major: number; version: bigint; beta: boolean }> {
-  // TWO NAMED BOXES, NEVER A SCAN. The registry gains two index boxes per
-  // passport created, so reading these through `boxes()` cost 1 + N round
-  // trips and grew with adoption — on the first screen a visitor sees.
-  // See `boxValue`.
-  //
-  // The manager check is settled from GLOBALS alone, so an allowlisted
-  // address costs one box read and the manager costs none.
+  opts: { shape?: RegistryShape } = {},
+): Promise<Entitlement> {
   const g = await globals(algod, registry);
   const mgr = g['manager'];
   const isManager = mgr instanceof Uint8Array && encodeAddress(mgr) === who;
-  const beta = isManager
-    || (await boxValue(algod, registry, addrBox(REG_BOX.beta, who))) !== null;
-  if (beta) {
-    // BETA tracks the LINE HEAD, so it always gets the newest patch — and
-    // therefore takes any notice period on a fresh approval itself.
-    const major = Number(asU(g, 'latest_major'));
-    if (major === 0 || major < Number(asU(g, 'min_major'))) {
-      return { major: 0, version: 0n, beta };
-    }
-    const head = await boxValue(algod, registry, boxName(REG_BOX.head, major));
-    return { major, version: head ? readU64(head, 0) : 0n, beta };
-  }
-  // EVERYONE ELSE gets exactly `stable_version`, which may LAG its line. That
-  // lag is the mechanism: it lets v1.0.0 stay public while v1.1.0 is beta-tested,
-  // and lets the tested change land later as an IN-PLACE upgrade.
-  const version = asU(g, 'stable_version');
-  if (version === 0n) return { major: 0, version: 0n, beta };
-  const major = Number(version / 1_000_000n);
-  if (major < Number(asU(g, 'min_major'))) return { major: 0, version: 0n, beta };
-  return { major, version, beta };
+  // Skipped entirely for the manager: `_entitled` short-circuits before looking,
+  // and the manager has no `w` box to find.
+  const hasBetaBox = isManager
+    ? false
+    : (await boxValue(algod, registry, addrBox(REG_BOX.beta, who))) !== null;
+
+  const r = resolveLine(g, { isManager, hasBetaBox }, opts.shape);
+  // BETA TRACKS THE LINE HEAD, so it always gets the newest patch — and therefore
+  // takes any notice period on a fresh approval itself. Skipped when the line is
+  // closed or retired, where the box would answer a question already settled.
+  const head =
+    r.beta && r.line !== 0 && !r.retired
+      ? await boxValue(algod, registry, boxName(REG_BOX.head, r.line))
+      : null;
+  return resolveVersion(g, r, head ? readU64(head, 0) : null);
 }
