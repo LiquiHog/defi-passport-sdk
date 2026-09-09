@@ -29,9 +29,10 @@
  */
 import type { Algodv2 } from 'algosdk';
 import { HASH_PAGE_BYTES, REG_BOX } from './constants.js';
-import { boxName, pageHash } from './encode.js';
+import { boxName, pageHash, readU64 } from './encode.js';
 import { GENERATED, type GeneratedBuild } from './programs.gen.js';
-import { boxValue, hex } from './read.js';
+import { boxValue, globals, hex } from './read.js';
+import { betaHeadLine, reachableVersions, type ReachableVersion } from './entitlement.js';
 import type { Num } from './types.js';
 
 // `atob` rather than `Buffer`, so this stays browser-safe: `Buffer` is Node-only
@@ -55,9 +56,31 @@ export type BuildTier = GeneratedBuild['tier'];
 export type BuildLabel = keyof typeof GENERATED;
 
 export interface Build {
-  /** Which build this is, as `tier@version`. */
+  /**
+   * Which build this is, as `tier@version`. DIAGNOSTIC ONLY — never display it.
+   *
+   * It names the BYTES, not the version an owner is running, and the two come
+   * apart the moment a line reaches parity. When v1.0.2 shipped bytes identical
+   * to v1.1.1, `buildForVersion(1000002)` began returning `full@1.1.1` — correct
+   * about the program, and a beta-looking string to show a public-channel owner.
+   *
+   * A `Build` cannot carry the version, and that is deliberate rather than an
+   * oversight: the same bytes are approved under many version numbers, which is
+   * exactly why this resolves by hash instead of by table. The version belongs to
+   * the caller, who passed it in.
+   *
+   * To display a version, format the VERSION: `version.format(state.version)`
+   * gives `v1.0.2`. Reach for this only in logs, errors and support output.
+   */
   readonly label: BuildLabel;
-  /** The tier alone, when the era does not matter. */
+  /**
+   * The tier these bytes were CUT for. Diagnostic only, and the more misleading
+   * of the two — it reads as "which tier is this owner on" and is not.
+   *
+   * After a line reaches parity the public tier runs the full build, so a stable
+   * owner's build reports `full`. Which channel an owner is actually on comes
+   * from `read.entitled().beta`, never from here.
+   */
   readonly tier: BuildTier;
   readonly approval: Uint8Array;
   readonly clear: Uint8Array;
@@ -163,6 +186,10 @@ export async function buildForVersion(
  * Pass a `build` to check one specifically; omit it to accept any bundled build,
  * which is what a caller about to create a passport wants — it asks "can I serve
  * this version at all", and `matched` says with which.
+ *
+ * `matched` is a BuildLabel, so it is diagnostic like every other label: it names
+ * the bytes that satisfied the registry, not the version asked for. Those differ
+ * whenever one program serves several versions.
  */
 export async function verifyVersion(
   algod: Algodv2,
@@ -185,4 +212,52 @@ export async function verifyVersion(
   } catch {
     return { ok: false, expected: want.approval };
   }
+}
+
+export interface CoverageEntry extends ReachableVersion {
+  /** False when this SDK carries no build matching what the registry approved. */
+  ok: boolean;
+  /** Which bundled build serves it. Diagnostic — see `Build.label`. */
+  label?: BuildLabel;
+}
+
+export interface Coverage {
+  /** True when every reachable version resolves to a bundled build. */
+  ok: boolean;
+  entries: CoverageEntry[];
+}
+
+/**
+ * Can this SDK serve everything this registry can hand out?
+ *
+ * ASK AT STARTUP, NOT AT CREATE. The failure this catches is a bundle older than
+ * the registry, and left unchecked it surfaces at the worst possible moment: a
+ * user clicks create, and `buildForVersion` throws because the version they are
+ * entitled to is newer than anything shipped here. That is a deploy problem
+ * wearing a user's error message.
+ *
+ * TWO VERSIONS, ALWAYS. A registry can hand out exactly what its two tiers
+ * resolve to — `stable_version`, and the head of `beta_line` — and nothing else.
+ * See `entitlement.reachableVersions` for why that is the complete answer rather
+ * than a sample, and why the tempting alternatives are each wrong.
+ *
+ * Costs four named reads and NO listing: the globals, the beta head box, and one
+ * `v`+version box per tier. That matters because a registry gains two boxes per
+ * passport ever created, so anything that enumerates gets slower for everyone as
+ * adoption grows while looking fine in a test against a registry holding four.
+ *
+ * `ok` is true when nothing failed, which includes a registry that entitles
+ * nobody yet — an empty answer is not a gap in coverage.
+ */
+export async function coverage(algod: Algodv2, registry: Num): Promise<Coverage> {
+  const g = await globals(algod, registry);
+  const line = betaHeadLine(g);
+  const head = line ? await boxValue(algod, registry, boxName(REG_BOX.head, line)) : null;
+
+  const entries: CoverageEntry[] = [];
+  for (const target of reachableVersions(g, head ? readU64(head, 0) : null)) {
+    const v = await verifyVersion(algod, registry, target.version);
+    entries.push({ ...target, ok: v.ok, ...(v.matched ? { label: v.matched } : {}) });
+  }
+  return { ok: entries.every((e) => e.ok), entries };
 }

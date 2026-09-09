@@ -37,7 +37,7 @@
  * Add its id as an argument once one exists.
  */
 import algosdk from 'algosdk';
-import { entitlement, programs, read } from '../dist/index.js';
+import { entitlement, programs, read, version as version_ } from '../dist/index.js';
 
 const NAMED = {
   '3690557533': 'FIXTURE (dedicated, step-0)',
@@ -50,7 +50,9 @@ const DEFAULT_TARGETS = [
   // is what production becomes after step 1. Nothing else covers both at once.
   { id: '3690557533', expect: 'line' },
   { id: '3683706562', expect: 'line' },
-  { id: '3672932347', expect: 'major' },
+  // Production completed step 0. Nothing live is major-keyed any more, which is
+  // why the pre-migration path now has no exercise outside the unit suite.
+  { id: '3672932347', expect: 'line' },
 ];
 
 function parse(argv) {
@@ -136,7 +138,19 @@ async function report({ id, expect }) {
   const manager = mgr instanceof Uint8Array ? algosdk.encodeAddress(mgr) : null;
   console.log(`  detected shape:    ${shape}`);
   console.log(`  manager:           ${manager ?? '(none)'}`);
-  if (expect) check(shape === expect, `shape is ${expect} as expected`);
+  if (expect) {
+    if (shape === expect) {
+      check(true, `shape is ${expect} as expected`);
+    } else {
+      // Still a failure, because CI should stop — but the cause is almost always
+      // that the registry moved, not that the SDK is wrong. Say so.
+      check(
+        false,
+        `shape is ${shape}, expected ${expect} — this registry CHANGED SHAPE since ` +
+          `the expectation was written. Update it in DEFAULT_TARGETS if intended.`,
+      );
+    }
+  }
 
   const resolved = {};
   for (const [key, who, addr] of [
@@ -198,9 +212,35 @@ async function report({ id, expect }) {
       const b = await programs.buildForVersion(algod, BigInt(id), version);
       builds[key] = b;
       check(true, `${key.padEnd(6)} v${String(version).padEnd(9)} -> ${b.label} (${b.approval.length} B)`);
+      // The label names the BYTES. Once a line reaches parity the same program
+      // serves several versions, and the label keeps the name it was cut under —
+      // correct about the program, wrong as a thing to show an owner.
+      const named = b.label.split('@')[1];
+      if (named !== version_.format(version).slice(1)) {
+        note(`  ^ label names the BUILD, not the version: this owner runs ${version_.format(version)}`);
+      }
     } catch (err) {
       check(false, `${key.padEnd(6)} v${String(version).padEnd(9)} -> ${err.message.slice(0, 110)}`);
     }
+  }
+
+  // The SHIPPED coverage() must agree with what this script just worked out by
+  // hand. Checking them against each other is the point: consumers call that
+  // function, so verifying a parallel implementation here would prove nothing
+  // about what they get.
+  try {
+    const cov = await programs.coverage(algod, BigInt(id));
+    check(cov.ok, 'programs.coverage: the bundle serves every reachable version');
+    const byHand = Object.entries(resolved)
+      .filter(([, e]) => e.version > 0n)
+      .map(([tier, e]) => `${tier}:${e.version}`)
+      .sort()
+      .join(' ');
+    const shipped = cov.entries.map((e) => `${e.tier}:${e.version}`).sort().join(' ');
+    check(byHand === shipped, `programs.coverage agrees with this script (${shipped})`);
+  } catch (err) {
+    failures++;
+    console.log(`    FAIL programs.coverage threw: ${err.message}`);
   }
 
   // Coverage, not correctness: does this registry give the tiers different bytes?
@@ -223,6 +263,9 @@ for (const c of coverage) {
   console.log(
     `  ${c.label.padEnd(26)} ${String(c.shape).padEnd(8)} ${c.tierSplit === undefined ? '?' : c.tierSplit ? 'yes' : 'no'}`,
   );
+}
+if (!coverage.some((c) => c.shape === 'major')) {
+  console.log('  no target is major-keyed: the pre-migration path is unit-tested only');
 }
 const both = coverage.some((c) => c.shape === 'line' && c.tierSplit);
 console.log(

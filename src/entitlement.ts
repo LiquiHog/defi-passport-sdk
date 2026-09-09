@@ -170,6 +170,60 @@ export function resolveLine(
   return { line, beta, migrated, retired: false };
 }
 
+export interface ReachableVersion {
+  /** Which cohort reaches it. */
+  tier: 'stable' | 'beta';
+  /** The head-box key for that cohort. */
+  line: number;
+  version: bigint;
+}
+
+/**
+ * The line a BETA address resolves through, or 0 when none is open to it.
+ *
+ * Exposed because the head box cannot be named until the line is known, and a
+ * caller that wants the beta version has to read that box itself.
+ */
+export function betaHeadLine(g: Globals, shape?: RegistryShape): number {
+  const r = resolveLine(g, { isManager: false, hasBetaBox: true }, shape);
+  return r.retired ? 0 : r.line;
+}
+
+/**
+ * Every version this registry can hand to anybody. There are exactly TWO.
+ *
+ * This is the whole reason a coverage check is worth shipping rather than
+ * leaving to each caller. The obvious implementations are all wrong in different
+ * ways: checking only `stable_version` misses the beta cohort entirely; checking
+ * "every line head" needs the registry's boxes ENUMERATED, which costs a listing
+ * that grows by two boxes per passport ever created; and checking only the
+ * version you are about to use moves the failure to a user's create call instead
+ * of catching it at startup.
+ *
+ * Neither tier can be handed anything else. A head box for some other line
+ * entitles nobody, so verifying it proves nothing about what an owner can
+ * receive — which is what makes two the complete answer rather than a sample.
+ *
+ * `betaHead` is the u64 inside `h` + u64(`betaHeadLine(g)`), or null. Versions
+ * that resolve to 0 are omitted: a closed tier is not a gap in coverage.
+ */
+export function reachableVersions(
+  g: Globals,
+  betaHead: bigint | null,
+  shape?: RegistryShape,
+): ReachableVersion[] {
+  const cohorts = [
+    ['stable', { isManager: false, hasBetaBox: false }],
+    ['beta', { isManager: false, hasBetaBox: true }],
+  ] as const;
+  const out: ReachableVersion[] = [];
+  for (const [tier, who] of cohorts) {
+    const e = resolveVersion(g, resolveLine(g, who, shape), betaHead);
+    if (e.version > 0n) out.push({ tier, line: e.line, version: e.version });
+  }
+  return out;
+}
+
 /**
  * Step two: the version that line resolves to.
  *

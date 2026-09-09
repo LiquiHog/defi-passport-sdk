@@ -17,7 +17,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  betaHeadLine,
   detectShape,
+  reachableVersions,
   resolveLine,
   resolveVersion,
   type RegistryShape,
@@ -229,4 +231,73 @@ test('an explicit shape overrides detection, for a half-migrated harness', () =>
 test('a beta line whose head box is absent reports no version, not a wrong one', () => {
   const r = resolveLine(MIGRATED, ALLOWLISTED);
   assert.equal(resolveVersion(MIGRATED, r, null).version, 0n);
+});
+
+// ── what a registry can actually hand out ───────────────────────────────────
+//
+// The complete answer is TWO versions, and "complete" is the load-bearing word:
+// a coverage check that samples is worthless, because the one version it skipped
+// is the one a user gets handed at create time.
+
+test('exactly two versions are reachable, one per tier', () => {
+  const r = reachableVersions(MIGRATED, 27_000_002n);
+  assert.equal(r.length, 2);
+  assert.deepEqual(
+    r,
+    [
+      { tier: 'stable', line: 26_000, version: 26_000_001n },
+      { tier: 'beta', line: 27_000, version: 27_000_002n },
+    ],
+    'stable comes from the pin, beta from the head box',
+  );
+});
+
+test('beta is omitted when its head box is absent', () => {
+  // A line with a pointer but no head entitles nobody to anything, which is not
+  // a hole in coverage — there is nothing to serve.
+  const r = reachableVersions(MIGRATED, null);
+  assert.deepEqual(r.map((x) => x.tier), ['stable']);
+});
+
+test('a closed permissionless path leaves only beta', () => {
+  const r = reachableVersions({ ...MIGRATED, stable_version: 0n }, 27_000_002n);
+  assert.deepEqual(r.map((x) => x.tier), ['beta']);
+});
+
+test('a retired line is not reachable', () => {
+  // min_major 25 retires line 24000, so nothing on it can be handed out and it
+  // does not belong in a coverage check.
+  const retired = { ...MIGRATED, beta_line: 24_000n, stable_version: 24_000_000n };
+  assert.deepEqual(reachableVersions(retired, 24_000_009n), []);
+  assert.equal(betaHeadLine(retired), 0, 'a retired beta line has no head to read');
+});
+
+test('betaHeadLine names the box a caller must read, on either shape', () => {
+  assert.equal(betaHeadLine(MIGRATED), 27_000);
+  assert.equal(betaHeadLine(LEGACY), 27, 'pre-split the line IS the major');
+});
+
+test('the legacy shape resolves both tiers too', () => {
+  const r = reachableVersions(LEGACY, 27_000_009n);
+  assert.deepEqual(r, [
+    { tier: 'stable', line: 26, version: 26_000_000n },
+    { tier: 'beta', line: 27, version: 27_000_009n },
+  ]);
+});
+
+test('parity is representable: both tiers on one version', () => {
+  // What production looks like once the public line catches up — the two tiers
+  // resolve to different VERSIONS on different lines, even though the bytes
+  // behind them are identical. Coverage is about versions, so both still count.
+  const parity = g({
+    latest_major: 1,
+    latest_version: 1_001_001,
+    beta_line: 1_001,
+    stable_version: 1_000_002,
+    min_major: 0,
+  });
+  assert.deepEqual(reachableVersions(parity, 1_001_001n), [
+    { tier: 'stable', line: 1_000, version: 1_000_002n },
+    { tier: 'beta', line: 1_001, version: 1_001_001n },
+  ]);
 });
