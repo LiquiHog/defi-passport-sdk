@@ -8,12 +8,10 @@
  * regression suite from 9/9 to 2/9, and none of these builders had a test.
  *
  * THE SETS BELOW WERE READ FROM THE CONTRACT, NOT INFERRED FROM BEHAVIOUR —
- * `_ceiling`, `_entitled`, `create_entry`, `link_passport` and `verify_update` in
- * registry.py at 6d78024, which is the build deployed on all three live
- * registries. `scripts/live-check.mjs` pins that program by sha256 and fails when
- * it moves, because the day it changes these assertions stop describing anything
- * real. The registry runs with `testing` at 1 and `upgrade_delay` at 0, so it can
- * be replaced with no notice.
+ * `_ceiling`, `_entitled`, `create_entry`, `link_passport` and `verify_update`,
+ * in the registry build deployed on every live registry at the time of writing.
+ * `scripts/live-check.mjs` pins that program by sha256 and fails when it moves,
+ * because the day it changes these assertions stop describing anything real.
  *
  *   create_entry    v+version, e+owner, w+owner, h+line
  *                   version and line both come from _entitled/_ceiling, which is

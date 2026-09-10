@@ -49,16 +49,15 @@ import { entitlement, programs, read, version as version_ } from '../dist/index.
  * behaviour, which is what makes them exact. It is also what makes them STALE the
  * instant the registry's program changes.
  *
- * PIN THE HASH, NOT THE DATE. Production runs with `testing` at 1 and
- * `upgrade_delay` at 0, so the registry program can be replaced with no notice
- * period at all. "Unchanged since August" is a fact about the past, not a promise
- * about next week. When this moves, the reference sets have to be re-read from
- * the new source before any test asserting them can be believed again.
+ * PIN THE HASH, NOT THE DATE. A deployed program can be replaced, so "unchanged
+ * since we last looked" is a fact about the past rather than a promise about next
+ * week. Comparing the hash is the only form of that statement worth writing down.
+ * When it moves, the reference sets have to be re-read from the new build before
+ * any test asserting them can be believed again.
  */
 const REGISTRY_PROGRAM = {
   sha256: '919242f451c0877b533713844d00451d9e3213e7f63a54f20f2ba43f6d8bf8f6',
   bytes: 2856,
-  source: 'spike/registry.py @ 6d78024',
 };
 
 /**
@@ -176,9 +175,9 @@ async function report({ id, expect }) {
     const program = info.params?.approvalProgram ?? new Uint8Array();
     const sha = createHash('sha256').update(program).digest('hex');
     if (sha === REGISTRY_PROGRAM.sha256) {
-      check(true, `registry program is ${REGISTRY_PROGRAM.source} (${program.length} B)`);
+      check(true, `registry program matches the pinned build (${program.length} B)`);
     } else {
-      check(false, `registry program CHANGED — no longer ${REGISTRY_PROGRAM.source}`);
+      check(false, 'registry program CHANGED — no longer the pinned build');
       note(`deployed ${program.length} B sha256 ${sha}`);
       note('the box-reference sets in test/create.test.ts were read from that source');
       note('and must be re-read before they can be trusted again');
