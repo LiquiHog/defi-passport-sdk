@@ -44,9 +44,15 @@
  * 0.3.0 update omitted the state schema, which that path reads as "change to
  * 0/0"; the front end found it by doing exactly this against mainnet.
  *
- * Pre-approval the expected stop is the REGISTRY refusing the version. A stop at
- * the passport — schema, pages, fee, budget, balance — is a failure. Success is
- * what a beta owner will see once the version is approved.
+ * The rehearsal targets what the owner is ENTITLED to, with the bytes the
+ * registry expects for it — the upgrade a front end would actually build. Once
+ * that version is approved this should succeed outright. A passport already on
+ * its entitlement gets a synthetic probe one past its version instead: that one
+ * stops at the registry by design and exercises only the ledger path.
+ *
+ * A stop at the passport — schema, pages, fee, budget, balance — is a failure
+ * either way. A stop at the registry is expected for the probe, and for a real
+ * target it is registry policy (a version timelock, say), reported, not failed.
  */
 import { createHash } from 'node:crypto';
 import algosdk from 'algosdk';
@@ -342,12 +348,16 @@ async function rehearseUpgrade(id) {
   const st = await read.passportState(algod, BigInt(id));
   const params = await read.appParams(algod, BigInt(id));
   const e = await read.entitled(algod, st.registry, st.owner);
-  // The largest bundled build: the one that exercises growth, pages and fee.
-  const build = programs.ALL_BUILDS.reduce((a, b) => (b.approval.length > a.approval.length ? b : a));
-  const target = st.version + 1n; // past what it runs; the registry decides if it exists
+  // The REAL upgrade when there is one: the entitled version, with the exact
+  // bytes the registry approved for it. Otherwise a synthetic probe.
+  const real = e.version > st.version;
+  const target = real ? e.version : st.version + 1n;
+  const build = real
+    ? await programs.buildForVersion(algod, st.registry, e.version)
+    : programs.ALL_BUILDS.reduce((a, b) => (b.approval.length > a.approval.length ? b : a));
   const cost = await read.upgradeCost(algod, BigInt(id), build);
-  console.log(`  runs ${version_.format(st.version)}  owner ${st.owner.slice(0, 8)}…  line ${e.line}  pages ${params.extraPages}  schema ${params.schema.globalInts}/${params.schema.globalBytes}`);
-  console.log(`  rehearsing ${build.label} as v${target}: pages -> ${cost.extraPages}, wallet needs ${cost.spendable} spendable`);
+  console.log(`  runs ${version_.format(st.version)}  owner ${st.owner.slice(0, 8)}…  line ${e.line}  entitled to ${version_.format(e.version)}  pages ${params.extraPages}  schema ${params.schema.globalInts}/${params.schema.globalBytes}`);
+  console.log(`  ${real ? 'REAL upgrade' : 'synthetic probe'}: ${build.label} as ${version_.format(target)}, pages -> ${cost.extraPages}, wallet needs ${cost.spendable} spendable`);
 
   const group = upgradeGroup({
     owner: st.owner,
@@ -362,13 +372,21 @@ async function rehearseUpgrade(id) {
     schema: params.schema,
   });
   const res = await simulate.simulate(algod, group, { passportAppId: Number(id), build });
+  const where = (res.failure.match(/pc=d+/) ?? ['(no pc)'])[0];
   if (res.ok) {
-    check(true, 'the upgrade group passes the ledger AND the registry (version approved and permitted)');
+    check(true, real
+      ? `the real upgrade to ${version_.format(target)} succeeds end to end — ledger and registry`
+      : 'the probe passes the ledger and the registry');
     return;
   }
   const atRegistry = res.app !== undefined && BigInt(res.app) === st.registry;
   if (atRegistry) {
-    check(true, `passes the ledger; stops at the registry as expected pre-approval: ${res.failure.split('\n')[0].slice(0, 90)}`);
+    if (real) {
+      check(true, `passes the ledger; the registry declined the entitled version at ${where}`);
+      note('a registry policy on an approved version (timelock?), not a defect in the update');
+    } else {
+      check(true, `passes the ledger; stops at the registry as a probe should (${where})`);
+    }
     return;
   }
   check(false, `refused before the registry — a defect in the update itself: ${res.failure.split('\n')[0].slice(0, 110)}`);
