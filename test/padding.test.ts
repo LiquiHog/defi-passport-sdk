@@ -6,13 +6,12 @@
  * no box at all. Builders cannot see which version a passport runs, so they pad
  * for the largest bundled build (`MAX_PROGRAM_OVERFLOW`).
  *
- * Today no bundled build is over the cap, so the padding is a no-op and the
- * first tests assert exactly that: real references untouched, nothing added.
- * The last block asserts the padded shape and is SKIPPED until an oversized
- * build is bundled — at which point it runs without any edit, which is the
- * property being protected. The wiring itself is proven by mutation: raising the
- * overflow by hand makes that block pass and keeps every call under eight
- * references.
+ * The first tests are written against whatever the bundle implies, so they held
+ * while no bundled build was over the cap (padding a no-op, nothing added) and
+ * hold now that v1.1.2 is: real references untouched, empties up to the need.
+ * The last block asserts the padded shape and is SKIPPED while no bundled build
+ * is oversized — it switched on when v1.1.2 was bundled, without any edit, which
+ * is the property being protected.
  */
 import assert from 'node:assert/strict';
 import { test } from 'node:test';

@@ -25,7 +25,7 @@ import { abiBytes, boxName, u64, u64List } from './encode.js';
 import { flat } from './create.js';
 import { padBoxes } from './pages.js';
 import { MAX_PROGRAM_OVERFLOW } from './programs.js';
-import type { Group, Num, PassportCtx } from './types.js';
+import type { Group, Num, PassportCtx, ProfitSpec } from './types.js';
 import { arc2 } from './note.js';
 
 const cm = (passport: bigint, asset: Num): BoxReference => ({
@@ -308,6 +308,62 @@ export function setRefundBudget(ctx: PassportCtx, a: { sid: Num; amount: Num }):
   });
 }
 
+const PROFIT_KIND = { none: 0, owner: 1, reserve: 2, gas: 3 } as const;
+const PROFIT_MODE = { rate: 0, fixed: 1 } as const;
+
+/**
+ * Route a slice of every fill's proceeds somewhere other than free balance.
+ * Owner-set, keeper-read: the keeper can change neither the rate nor the
+ * destination, and a skim never exceeds a fill's net proceeds.
+ *
+ * Destinations: the OWNER (skipped, never reverted, if the owner is not opted
+ * in to the asset); another strategy's quote pool (RESERVE — "profits repay
+ * the loan"); or the ALGO gas lock (GAS — "the passport pays for itself"; a
+ * non-ALGO skim stays free instead). `none` deletes the routing.
+ *
+ * THE BOXES ARE THE POINT OF THIS BUILDER. The contract reads the strategy
+ * header and the `sp` box on every call; on a set it also re-checks free ALGO
+ * through `cm`+0; and for RESERVE it reads the receiving header and pre-creates
+ * that strategy's quote-asset ledger box on the owner's signature, so that a
+ * crank is never the thing that raises minimum balance. Every one of those has
+ * to be named at signing time, and the last one cannot be derived here — hence
+ * `destQuoteAsset`, from `read.strategy(destSid).quoteAsset`.
+ *
+ * Validation mirrors the contract's own asserts so a bad value fails here with
+ * a message instead of on chain as a bare pc. NEW IN v1.1.2.
+ */
+export function setProfit(ctx: PassportCtx, a: { sid: Num } & ProfitSpec): Transaction {
+  const p = BigInt(ctx.passport);
+  const own: BoxReference[] = [
+    { appIndex: p, name: boxName(BOX.strategy, a.sid) },
+    { appIndex: p, name: boxName(BOX.profit, a.sid) },
+  ];
+  if (a.kind === 'none') {
+    return call(ctx, PASSPORT.set_profit, [u64(a.sid), u64(0), u64(0), u64(0), u64(0)], {
+      boxes: own,
+      note: { sid: a.sid, dest: 0 },
+    });
+  }
+  const value = BigInt(a.value);
+  if (value <= 0n) throw new RangeError('skim value must be positive');
+  if (a.mode === 'rate' && value > 10_000n) {
+    throw new RangeError(`a rate is basis points of net proceeds, so at most 10000 (got ${value})`);
+  }
+  const boxes: BoxReference[] = [...own, cm(p, 0)];
+  let destSid = 0n;
+  if (a.kind === 'reserve') {
+    destSid = BigInt(a.destSid);
+    if (destSid === BigInt(a.sid)) throw new RangeError('a strategy cannot reserve into itself');
+    boxes.push({ appIndex: p, name: boxName(BOX.strategy, destSid) }, cm(p, a.destQuoteAsset));
+  }
+  return call(
+    ctx,
+    PASSPORT.set_profit,
+    [u64(a.sid), u64(PROFIT_MODE[a.mode]), u64(value), u64(PROFIT_KIND[a.kind]), u64(destSid)],
+    { boxes, note: { sid: a.sid, dest: PROFIT_KIND[a.kind] } },
+  );
+}
+
 /**
  * Close a strategy and release everything it holds. `ruleIds` must list EVERY
  * live rule exactly once.
@@ -327,11 +383,16 @@ export function closeStrategyGroup(
     // even where it does not exist — a reference to an absent box is legal, a
     // missing reference to a present one is "invalid Box reference".
     { appIndex: p, name: boxName(BOX.profit, a.sid) },
+    // Also from v1.1.2: close checks that no Folks loan is still bound to the
+    // strategy, by box length. That is a box read whether or not the loan
+    // exists, so the reference is required even for a strategy that never had
+    // one. Read from the contract source, not the brief — the brief named only sp.
+    { appIndex: p, name: boxName(BOX.loan, a.sid) },
     ...a.ruleIds.map((r) => ({ appIndex: p, name: boxName(BOX.rule, a.sid, r) })),
     ...[...new Set([0, ...a.assets.map(Number)])].map((x) => cm(p, x)),
   ];
-  // Three real boxes at minimum (strategy, profit, cm+0), which meets the read
-  // budget of any build this SDK bundles on its own. Members therefore do not
+  // Four real boxes at minimum (strategy, profit, loan, cm+0), which meets the
+  // read budget of any build this SDK bundles on its own. Members therefore do not
   // pad themselves: the head is sized to the slot limit and cannot take more.
   const fassets = assetRefs(...a.assets);
   const head = Math.max(1, MAX_REFS_PER_TXN - fassets.length);

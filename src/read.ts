@@ -27,6 +27,7 @@ import {
 } from './entitlement.js';
 import { lineOf } from './version.js';
 import type {
+  GasAsset,
   Num,
   PassportState,
   Position,
@@ -66,6 +67,18 @@ export async function passportState(algod: Algodv2, app: Num): Promise<PassportS
     routerAppId: asU(g, 'router_app_id'),
     budgetAppId: asU(g, 'budget_app_id'),
     gasCap: asU(g, 'gas_cap'),
+    gasAsset: g['ga'] instanceof Uint8Array ? decodeGasAsset(g['ga']) : null,
+  };
+}
+
+/** The `ga` global: asset, maxNum, maxDen, expires — four u64s, 32 bytes. */
+export function decodeGasAsset(raw: Uint8Array): GasAsset {
+  if (raw.length !== 32) throw new Error(`gas-asset election is ${raw.length} B, expected 32`);
+  return {
+    asset: readU64(raw, 0),
+    maxNum: readU64(raw, 8),
+    maxDen: readU64(raw, 16),
+    expires: readU64(raw, 24),
   };
 }
 

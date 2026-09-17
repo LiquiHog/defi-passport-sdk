@@ -47,6 +47,23 @@ export interface PassportState {
    * brake, rather than surfacing this number directly.
    */
   gasCap: bigint;
+  /**
+   * The owner's election to have gas refunds charged in another asset, or null
+   * when none is set. A refund is paid in the asset only where the keeper also
+   * accepts it, at no worse than `maxNum / maxDen` units per uALGO, and only
+   * until `expires`; everywhere else it is ALGO. See `manage.setGasAsset`.
+   */
+  gasAsset: GasAsset | null;
+}
+
+/** The `ga` global: four u64s. */
+export interface GasAsset {
+  asset: bigint;
+  /** The most of `asset` the owner will pay per uALGO, as a fraction. */
+  maxNum: bigint;
+  maxDen: bigint;
+  /** Unix seconds. The contract refuses an election that has already expired. */
+  expires: bigint;
 }
 
 /** A strategy header (`s`+sid, 64 B). */
@@ -99,6 +116,27 @@ export interface ProfitRouting {
   /** The receiving strategy. Meaningful only when `kind` is `reserve`. */
   destSid: bigint;
 }
+
+/**
+ * What `manage.setProfit` writes. `none` deletes the routing; the other three
+ * are the contract's destination kinds 1, 2 and 3.
+ */
+export type ProfitSpec =
+  | { kind: 'none' }
+  | { kind: 'owner' | 'gas'; mode: 'rate' | 'fixed'; value: Num }
+  | {
+      kind: 'reserve';
+      mode: 'rate' | 'fixed';
+      value: Num;
+      /** The strategy whose quote pool receives the skim. Not `sid` itself. */
+      destSid: Num;
+      /**
+       * The receiving strategy's quote asset, from `read.strategy`. The contract
+       * pre-creates that asset's committed-ledger box on the owner's signature,
+       * so the box has to be named here and the builder cannot derive it.
+       */
+      destQuoteAsset: Num;
+    };
 
 /** What an in-place upgrade will cost the OWNER'S WALLET, before they sign. */
 export interface UpgradeCost {

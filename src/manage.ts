@@ -242,3 +242,39 @@ export function setGasCap(ctx: PassportCtx, txns: Num): Transaction {
   }
   return call(ctx, PASSPORT.set_gas_cap, [u64(txns)]);
 }
+
+/**
+ * Elect to have gas refunds charged in `asset` instead of ALGO. Owner-signed.
+ *
+ * Half of a bargain, and deliberately only half: the owner states the most of
+ * `asset` they will pay per uALGO and until when; the keeper states per crank
+ * which asset it accepts and at what discount. A refund is paid in the asset
+ * only where the two agree, at the better price for the owner, and everywhere
+ * else it is ALGO. No owner can force an asset on a keeper and no keeper can
+ * pay in something the owner did not elect.
+ *
+ * The reserve it draws on is an ordinary `lock(asset, n)` position, made
+ * separately. This call writes a global and NAMES NO BOX — the empties it
+ * carries buy the read budget every call to a v1.1.2 passport pays.
+ *
+ * `asset` 0 clears the election; the other three arguments are then ignored.
+ * NEW IN v1.1.2: on an older passport this is an unknown method.
+ */
+export function setGasAsset(
+  ctx: PassportCtx,
+  a: { asset: Num; maxNum: Num; maxDen: Num; expires: Num },
+): Transaction {
+  const asset = BigInt(a.asset);
+  if (asset === 0n) {
+    return call(ctx, PASSPORT.set_gas_asset, [u64(0), u64(0), u64(0), u64(0)]);
+  }
+  if (BigInt(a.maxNum) <= 0n || BigInt(a.maxDen) <= 0n) {
+    throw new RangeError('maxNum and maxDen must both be positive — the rate is a fraction');
+  }
+  // The contract compares against the chain's clock; the local one is close
+  // enough to refuse a value that is plainly already in the past.
+  if (BigInt(a.expires) <= BigInt(Math.floor(Date.now() / 1000))) {
+    throw new RangeError('expires must be a future unix time — the contract refuses an expired election');
+  }
+  return call(ctx, PASSPORT.set_gas_asset, [u64(asset), u64(a.maxNum), u64(a.maxDen), u64(a.expires)]);
+}

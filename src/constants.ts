@@ -100,6 +100,7 @@ export const BOX = {
   committed: 'cm', //cm + asset          the committed ledger
   position: 'p', //  p  + asset          locked funds + valuation legs
   profit: 'sp', //   sp + sid            profit routing (40 B); absent = none
+  loan: 'fl', //     fl + sid            an open Folks loan; close refuses while present
 } as const;
 
 /** Registry box prefixes. */

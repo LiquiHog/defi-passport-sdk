@@ -38,6 +38,16 @@ export const PASSPORT = {
   set_refund_budget: m('set_refund_budget(uint64,uint64)void'),
   // the passport-wide ceiling on what one crank may refund
   set_gas_cap: m('set_gas_cap(uint64)void'),
+  // v1.1.2 — owner-facing
+  set_gas_asset: m('set_gas_asset(uint64,uint64,uint64,uint64)void'),
+  set_profit: m('set_profit(uint64,uint64,uint64,uint64,uint64)void'),
+  // v1.1.2 — ABI only. Folks strategies do not ship at launch; verify_fill is
+  // issued inside a fill group by the keeper or counterparty; restore_strategy
+  // is an operator recovery path. None has an owner builder here yet.
+  open_loan: m('open_loan(uint64,address,uint64)void'),
+  folks_close: m('folks_close(uint64)void'),
+  verify_fill: m('verify_fill(uint64,uint64)void'),
+  restore_strategy: m('restore_strategy(uint64)void'),
   // owner-driven swap, and the keeper's entry point
   swap: m('swap(uint64,uint64,uint64,uint64,byte[])uint64'),
   ping: m('ping()void'),

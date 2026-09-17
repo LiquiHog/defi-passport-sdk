@@ -19,22 +19,46 @@ import { ALL_BUILDS, BUILDS } from '../dist/programs.js';
 import { explain } from '../dist/simulate.js';
 import { pageHash } from '../dist/encode.js';
 import { HASH_PAGE_BYTES } from '../dist/constants.js';
+import { createHash } from 'node:crypto';
 
 const hex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 const OLD = ['restricted@1.0.0', 'full@1.1.0'] as const;
 const NEW = ['restricted@1.0.1', 'full@1.1.1'] as const;
+// The beta line's next build. Full only — there is no restricted build on it.
+const NEXT = ['full@1.1.2'] as const;
 
-test('all four builds are bundled, both tiers in both eras', () => {
-  assert.equal(ALL_BUILDS.length, 4);
-  for (const label of [...OLD, ...NEW]) {
+test('all five builds are bundled: both tiers in both eras, plus the beta line\'s next', () => {
+  assert.equal(ALL_BUILDS.length, 5);
+  for (const label of [...OLD, ...NEW, ...NEXT]) {
     assert.ok(BUILDS[label], `${label} must stay bundled`);
   }
   assert.deepEqual(
     ALL_BUILDS.map((b) => b.tier).sort(),
-    ['full', 'full', 'restricted', 'restricted'],
+    ['full', 'full', 'full', 'restricted', 'restricted'],
   );
+});
+
+test('full@1.1.2 is the frozen build, by both digests in the NOTE', () => {
+  // Two independent pins. The page hash is what the registry stores and what
+  // its version box will hold once 1001002 is approved — already visible on the
+  // suite-managed fixture. The plain sha256 is what identifies the bytes
+  // themselves, independent of the hashing scheme. Either alone could be
+  // satisfied by a mistake the other catches.
+  const b = BUILDS['full@1.1.2'];
+  assert.equal(b.approval.length, 10_588);
+  assert.equal(b.clear.length, 4);
+  assert.equal(b.pageHash, '196ffc1c458b52885007c81c70423ea1a275c62a02d7d8b8f12306280ac35629');
+  assert.equal(
+    createHash('sha256').update(b.approval).digest('hex'),
+    'c09607df40079f46af414a3832a5b0e5d9b0958882e14fc438755df264c730f9',
+  );
+  assert.equal(
+    createHash('sha256').update(b.clear).digest('hex'),
+    'ed90f0d2da1f1d1abd773c45230651a292a90edbc12a7bf859a493a12a640ce7',
+  );
+  assert.equal(b.tier, 'full');
 });
 
 test('each declared pageHash really is the hash of the bundled bytes', async () => {
@@ -46,9 +70,9 @@ test('each declared pageHash really is the hash of the bundled bytes', async () 
   }
 });
 
-test('the four builds are four distinct programs', () => {
+test('the five builds are five distinct programs', () => {
   const hashes = new Set(ALL_BUILDS.map((b) => b.pageHash));
-  assert.equal(hashes.size, 4, 'two builds sharing a page hash means a generation mistake');
+  assert.equal(hashes.size, 5, 'two builds sharing a page hash means a generation mistake');
 });
 
 test('an explicit build resolves pc 621 to that era, and never hedges', () => {

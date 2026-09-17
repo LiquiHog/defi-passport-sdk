@@ -28,6 +28,7 @@ const st = (version: bigint, gasCap: bigint): PassportState => ({
   routerAppId: 0n,
   budgetAppId: 0n,
   gasCap,
+  gasAsset: null,
 });
 
 const V100 = 1_000_000n; // v1.0.0 — the public build, no set_gas_cap

@@ -132,6 +132,65 @@ method.
 The cap bounds a RATE, not a total. Lifetime exposure is still the per-strategy
 `refundBudget` and the passport's gas reserve, both owner-set and separate.
 
+## Gas in another asset, and routing profit
+
+Both are v1.1.2, so check `read.passportState(...).version` before offering
+either — on an older passport the method does not exist.
+
+```ts
+import { manage, strategy, read } from '@liquihog/defi-passport-sdk';
+
+// "I will pay gas refunds in HOG, at no more than 3/2 HOG per uALGO, until then."
+manage.setGasAsset(ctx, { asset: HOG, maxNum: 3, maxDen: 2, expires });
+
+// Send 2.5% of every fill's proceeds to the owner's wallet.
+strategy.setProfit(ctx, { sid, kind: 'owner', mode: 'rate', value: 250 });
+
+// Or into another strategy's quote pool — profits repay the loan.
+const target = await read.strategy(algod, passportId, loanSid);
+strategy.setProfit(ctx, {
+  sid, kind: 'reserve', mode: 'rate', value: 1_000,
+  destSid: loanSid, destQuoteAsset: target.quoteAsset,
+});
+```
+
+The gas election is half of a bargain: the keeper states per crank which asset it
+accepts and at what discount, a refund is paid in the asset only where the two
+agree, and everywhere else it is ALGO. No owner can force an asset on a keeper
+and no keeper can pay in one the owner did not elect. `asset: 0` clears it.
+
+`setProfit` exists for its box references. A RESERVE routing makes the contract
+pre-create the receiving strategy's quote-asset ledger box on the owner's
+signature, so that a crank is never what raises minimum balance — and that asset
+cannot be derived here, which is why you pass it. `{ kind: 'none' }` deletes the
+routing; `read.profit` reads it back, and absent means none.
+
+## Upgrading to a larger build
+
+v1.1.2 is 10,588 bytes, over the 8,192-byte cap that used to bound a program.
+Three things follow, and the SDK handles each — but the first is yours to check
+before an owner signs:
+
+```ts
+const cost = await read.upgradeCost(algod, passportId, build);
+// { currentExtraPages: 3, extraPages: 5, mbrIncrease: 200_000, fee: 2000, spendable: 202_000 }
+```
+
+Growing pages raises minimum balance by 100,000 uALGO each, charged to the
+OWNER'S WALLET in the update transaction itself — never to the passport — so the
+wallet needs `spendable` available at that moment or the update fails with a
+balance error that reads like nothing to do with pages. Pass
+`cost.currentExtraPages` to `upgradeGroup`; it never declares fewer than the
+passport already has, because a smaller count is accepted and shrinks the app.
+
+The other two are automatic. The one transaction carrying an oversized program
+pays a surcharge, and — the part that is not intuitive — **every later call to
+the app needs box references, box or no box**. The AVM charges a read budget
+against the old cap for every app whatever its page count, and only box
+references buy it back. Every builder here pads with empty references sized from
+the largest bundled build; if you assemble raw transactions yourself, see
+`pages.boxRefsNeeded`.
+
 ## Reading state, cheaply
 
 `read.boxValue` fetches ONE box by name. Reach for `read.boxes` only when the
