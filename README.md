@@ -279,7 +279,13 @@ contract's emit sites rather than from descriptions of them — two of the nine
 v1.1.2 tags differ from how they were described (`skim` has six fields, and
 `lopen`'s escrow address sits between its two integers). `pfill` and `lfill`
 are crank fills of the Pay and Folks rule types; `ovfy` is relayed like one but
-is `verify_fill` settling a fill, and `isCrankFill` says no to it.
+is `verify_fill` settling a fill, and `isCrankFill` says no to it. A crank fill
+is not always a swap: `pfill` is a send and `lfill` a loan operation, and neither
+carries `outDelta` — render by tag, not by the predicate alone.
+
+To know which rule types a passport can open, resolve its build from its own
+version — `programs.buildForVersion(algod, registry, state.version).ruleTypes` —
+never from `open_strategy`'s selector, which is the same on every build.
 
 ## Reading state, cheaply
 

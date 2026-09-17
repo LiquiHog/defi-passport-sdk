@@ -1,7 +1,7 @@
 {
   "name": "@liquihog/defi-passport-sdk",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "TypeScript SDK for LiquiHog DeFi Passport — create and manage a passport.",
   "type": "module",
   "main": "dist/index.js",

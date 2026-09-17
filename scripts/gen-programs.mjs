@@ -79,6 +79,34 @@ function assertMap(arc56) {
   );
 }
 
+/**
+ * Which rule types a build's `open_strategy` accepts — read off its OWN assert
+ * map, not declared.
+ *
+ * The selector cannot tell you: open_strategy is the same method on every
+ * build. Matching a passport's bytes against the bundle cannot either — a
+ * passport on a build this SDK does not carry has no answer, which is the
+ * stale-SDK problem again. But every build compiles in the validation for what
+ * it accepts, and refuses the rest with a message, so the map is the truth:
+ *
+ *   - "this version supports DCA and limit rules only" is the public gate. A
+ *     build carrying it refuses grid and balancer at open_strategy, whatever
+ *     validation code for them it ALSO compiled in — so the gate wins.
+ *   - Folks and Pay each have asserts nothing else emits; their presence means
+ *     the build validates, and therefore accepts, that type.
+ *
+ * Numbers, not names: the generated file imports nothing. programs.ts types
+ * them as RuleType.
+ */
+function ruleTypesOf(assertMessages) {
+  const msgs = new Set(Object.values(assertMessages));
+  const has = (...m) => m.some((x) => msgs.has(x));
+  const types = has('this version supports DCA and limit rules only') ? [1, 4] : [1, 2, 3, 4];
+  if (has('bad folks tail', 'bad folks op', 'folks rule commits asset_a only')) types.push(5);
+  if (has('bad pay tail', 'payment uses one asset', 'payment commits asset_a only')) types.push(6);
+  return types;
+}
+
 /** `v1.0.1-public-6895.arc56.json` -> { label, tier }. */
 function labelFor(file) {
   const m = /^v(\d+\.\d+\.\d+)-(public|restricted|full)-/.exec(path.basename(file));
@@ -98,6 +126,7 @@ function extract(file) {
     approvalBytes: approval.length,
     pageHash: pageHash(approval).toString('hex'),
     assertMessages: assertMap(j),
+    ruleTypes: ruleTypesOf(assertMap(j)),
   };
 }
 
@@ -214,6 +243,10 @@ const listing = rows
   .map((r) => ` * ${r.label.padEnd(17)} ${String(r.approvalBytes).padStart(4)} B  page-hash ${r.pageHash}`)
   .join('\n');
 
+const typesListing = rows
+  .map((r) => ` * ${r.label.padEnd(17)} accepts rule types ${r.ruleTypes.join(', ')}`)
+  .join('\n');
+
 const header = `/**
  * GENERATED from the contracts build. DO NOT EDIT.
  *
@@ -232,11 +265,22 @@ const header = `/**
  *
 ${ambLine}
 ${listing}
+ *
+ * Rule types each build's open_strategy accepts, read from its own asserts:
+${typesListing}
  */
 
 export interface GeneratedBuild {
   /** Which tier this program serves. The public tier gets \`restricted\`. */
   readonly tier: 'restricted' | 'full';
+  /**
+   * The rule types this build's \`open_strategy\` accepts, derived by the
+   * generator from the build's own assert map. Numbers here; \`RuleType\` in
+   * programs.ts. Gate a UI's strategy picker on this, resolved through
+   * \`buildForVersion(state.version)\` — never on a method selector, which is
+   * identical on every build.
+   */
+  readonly ruleTypes: readonly number[];
   readonly approvalB64: string;
   readonly clearB64: string;
   readonly pageHash: string;
@@ -259,6 +303,7 @@ const body = rows
       .join(', ');
     return `  '${r.label}': {
     tier: '${r.tier}',
+    ruleTypes: [${r.ruleTypes.join(', ')}],
     approvalB64:
       '${r.approvalB64}',
     clearB64: '${r.clearB64}',

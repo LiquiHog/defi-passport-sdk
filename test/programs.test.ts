@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import { ALL_BUILDS, BUILDS } from '../dist/programs.js';
 import { explain } from '../dist/simulate.js';
 import { pageHash } from '../dist/encode.js';
-import { HASH_PAGE_BYTES } from '../dist/constants.js';
+import { HASH_PAGE_BYTES, RuleType } from '../dist/constants.js';
 import { createHash } from 'node:crypto';
 
 const hex = (b: Uint8Array): string =>
@@ -67,6 +67,32 @@ test('each declared pageHash really is the hash of the bundled bytes', async () 
   // hash here produces a creation the registry refuses and nothing can correct.
   for (const b of ALL_BUILDS) {
     assert.equal(hex(await pageHash(b.approval, HASH_PAGE_BYTES)), b.pageHash, b.label);
+  }
+});
+
+test('each build lists the rule types its open_strategy accepts — three tiers, not two', () => {
+  // The public gate refuses grid and balancer; the pre-1.1.2 full builds take
+  // the four; only full@1.1.2 validates Folks and Pay. A front end gating its
+  // strategy picker on this resolves the build via buildForVersion(state.version).
+  const { Schedule, Balancer, Grid, Limit, Folks, Pay } = RuleType;
+  assert.deepEqual(BUILDS['restricted@1.0.0'].ruleTypes, [Schedule, Limit]);
+  assert.deepEqual(BUILDS['restricted@1.0.1'].ruleTypes, [Schedule, Limit]);
+  assert.deepEqual(BUILDS['full@1.1.0'].ruleTypes, [Schedule, Balancer, Grid, Limit]);
+  assert.deepEqual(BUILDS['full@1.1.1'].ruleTypes, [Schedule, Balancer, Grid, Limit]);
+  assert.deepEqual(BUILDS['full@1.1.2'].ruleTypes, [Schedule, Balancer, Grid, Limit, Folks, Pay]);
+});
+
+test('ruleTypes is derived from the asserts each build carries, so it cannot drift from the bytes', () => {
+  // The generator's rule, recomputed here against the bundled maps. If someone
+  // hand-edits a list, or a future build gains a type without the asserts that
+  // go with it, this is what notices.
+  for (const b of ALL_BUILDS) {
+    const msgs = new Set(Object.values(b.assertMessages));
+    const has = (...m: string[]) => m.some((x) => msgs.has(x));
+    const want: number[] = has('this version supports DCA and limit rules only') ? [1, 4] : [1, 2, 3, 4];
+    if (has('bad folks tail', 'bad folks op', 'folks rule commits asset_a only')) want.push(5);
+    if (has('bad pay tail', 'payment uses one asset', 'payment commits asset_a only')) want.push(6);
+    assert.deepEqual([...b.ruleTypes], want, b.label);
   }
 });
 

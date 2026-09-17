@@ -199,7 +199,17 @@ export function unwrapRelay(
   return { passport: readU64(bytes, 2), payload: bytes.subarray(10) };
 }
 
-/** True for the six keeper-crank fills. Excludes `xfill` (an owner swap) and `ovfy`. */
+/**
+ * True for the six keeper-crank fills. Excludes `xfill` (an owner swap) and `ovfy`.
+ *
+ * A CRANK FILL IS NOT ALWAYS A SWAP. `sfill`, `ofill` and `gfill` carry
+ * `outDelta`, and `bfill` carries `outResult` — something was traded. `pfill` is
+ * a SEND (`spend`, `refund`, and the recipient in `addresses`) and `lfill` is a
+ * loan operation (`op`, `used`, `refund`); neither has an output amount, and
+ * `fields.outDelta` on them is undefined. A renderer that assumes "fill means
+ * swap" shows a payment as a trade of nothing. Render by tag or by `ruleType`,
+ * not by this predicate alone.
+ */
 export const isCrankFill = (tag: string): boolean => tag in FILL_RULE_TYPE;
 
 /**

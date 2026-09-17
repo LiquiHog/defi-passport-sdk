@@ -7,15 +7,15 @@
  * re-hashes the pages inside the group, and anything that does not match is
  * refused. The registry stores only hashes, never bytes, so they are bundled here.
  *
- * FOUR BUILDS SHIP, across two tiers AND two eras. The tier split is the obvious
+ * FIVE BUILDS SHIP, across two tiers AND three eras. The tier split is the obvious
  * one: a RESTRICTED build for the public and a FULL build for beta, and handing a
  * public owner the full bytes fails the page-hash check, so choosing correctly is
  * not cosmetic. The era split is the one that surprises people — an approved
  * version can never be un-approved, so v1.0.0 and v1.1.0 stay installable
- * alongside v1.0.1 and v1.1.1 and owners upgrade whenever they like.
+ * alongside v1.0.1, v1.1.1 and v1.1.2, and owners upgrade whenever they like.
  *
  * Which means a passport you are asked to explain a failure for may be running any
- * of the four, and `assertMessages` is NOT interchangeable between them.
+ * of the five, and `assertMessages` is NOT interchangeable between them.
  *
  * Choose by ASKING THE REGISTRY. `buildForVersion` reads the hash the registry
  * stored for that version and returns whichever bundled build matches. A local
@@ -28,7 +28,7 @@
  * not show you.
  */
 import type { Algodv2 } from 'algosdk';
-import { HASH_PAGE_BYTES, REG_BOX } from './constants.js';
+import { HASH_PAGE_BYTES, REG_BOX, type RuleType } from './constants.js';
 import { boxName, pageHash, readU64 } from './encode.js';
 import { GENERATED, type GeneratedBuild } from './programs.gen.js';
 import { boxValue, globals, hex } from './read.js';
@@ -83,6 +83,24 @@ export interface Build {
    * from `read.entitled().beta`, never from here.
    */
   readonly tier: BuildTier;
+  /**
+   * The rule types this build's `open_strategy` accepts.
+   *
+   * THIS IS HOW TO GATE A STRATEGY PICKER. The method selector cannot tell you —
+   * `open_strategy` is the same method on every build — and matching a
+   * passport's bytes against the bundle cannot either, because a passport on a
+   * build this SDK does not carry would have no answer. Resolve the build from
+   * the passport's own attested version instead:
+   *
+   *   const build = await programs.buildForVersion(algod, state.registry, state.version);
+   *   const canOpen = build.ruleTypes.includes(RuleType.Folks);
+   *
+   * Derived by the generator from each build's assert map — the validation it
+   * compiled in and the gate it carries — so it cannot drift from the bytes.
+   * Restricted builds accept Schedule and Limit only; full builds before 1.1.2
+   * accept the four; full@1.1.2 adds Folks and Pay.
+   */
+  readonly ruleTypes: readonly RuleType[];
   readonly approval: Uint8Array;
   readonly clear: Uint8Array;
   /** The page-hash the registry stores for this program. */
@@ -108,6 +126,7 @@ const materialise = (label: BuildLabel): Build => {
   return {
     label,
     tier: g.tier,
+    ruleTypes: g.ruleTypes as readonly RuleType[],
     approval: b64(g.approvalB64),
     clear: b64(g.clearB64),
     pageHash: g.pageHash,
