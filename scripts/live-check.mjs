@@ -2,7 +2,7 @@
  * The acceptance run: ONE SDK build against EVERY registry shape.
  *
  *   npm run live-check
- *   node scripts/live-check.mjs [--url <algod>] [<app-id>[:line|major] ...]
+ *   node scripts/live-check.mjs [--url <algod>] [--passport <app-id>] [<app-id>[:line|major] ...]
  *
  * READS ONLY. Nothing here signs, submits, or needs an account or a key.
  *
@@ -35,10 +35,29 @@
  * The coverage that matters is a registry where the tier split AND the line-keyed
  * shape hold at once, because that is what production looks like after step 1.
  * Add its id as an argument once one exists.
+ *
+ * WOULD AN UPGRADE GET PAST THE LEDGER? With `--passport <id>`, the upgrade group
+ * for that passport is built exactly as a front end would build it and SIMULATED —
+ * unsigned, nothing submitted — against the largest bundled build. What this
+ * catches is the class of defect a unit test cannot see: a transaction whose
+ * shape is wrong only on the wire and only on the ledger's size-change path. The
+ * 0.3.0 update omitted the state schema, which that path reads as "change to
+ * 0/0"; the front end found it by doing exactly this against mainnet.
+ *
+ * Pre-approval the expected stop is the REGISTRY refusing the version. A stop at
+ * the passport — schema, pages, fee, budget, balance — is a failure. Success is
+ * what a beta owner will see once the version is approved.
  */
 import { createHash } from 'node:crypto';
 import algosdk from 'algosdk';
-import { entitlement, programs, read, version as version_ } from '../dist/index.js';
+import {
+  entitlement,
+  programs,
+  read,
+  simulate,
+  upgradeGroup,
+  version as version_,
+} from '../dist/index.js';
 
 /**
  * The registry program the box-reference tests were derived FROM.
@@ -93,19 +112,24 @@ const DEFAULT_TARGETS = [
 
 function parse(argv) {
   let url = 'https://mainnet-api.algonode.cloud';
+  let passport = null;
   const targets = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--url') {
       url = argv[++i];
       continue;
     }
+    if (argv[i] === '--passport') {
+      passport = argv[++i];
+      continue;
+    }
     const [id, expect] = argv[i].split(':');
     targets.push({ id, ...(expect ? { expect } : {}) });
   }
-  return { url, targets: targets.length ? targets : DEFAULT_TARGETS };
+  return { url, passport, targets: targets.length ? targets : DEFAULT_TARGETS };
 }
 
-const { url, targets } = parse(process.argv.slice(2));
+const { url, passport, targets } = parse(process.argv.slice(2));
 const algod = new algosdk.Algodv2('', url, '');
 
 /** A well-formed address that will not have a `w` box: the stable cohort. */
@@ -308,8 +332,59 @@ async function report({ id, expect }) {
   coverage.push({ label, shape, tierSplit });
 }
 
+/**
+ * Build the upgrade a front end would build for this passport and simulate it.
+ * Read-only: `allowEmptySignatures` and `fixSigners` let algod evaluate an
+ * unsigned group as the owner without any key being present.
+ */
+async function rehearseUpgrade(id) {
+  console.log(`\n${'='.repeat(74)}\nUPGRADE REHEARSAL  passport ${id}\n${'='.repeat(74)}`);
+  const st = await read.passportState(algod, BigInt(id));
+  const params = await read.appParams(algod, BigInt(id));
+  const e = await read.entitled(algod, st.registry, st.owner);
+  // The largest bundled build: the one that exercises growth, pages and fee.
+  const build = programs.ALL_BUILDS.reduce((a, b) => (b.approval.length > a.approval.length ? b : a));
+  const target = st.version + 1n; // past what it runs; the registry decides if it exists
+  const cost = await read.upgradeCost(algod, BigInt(id), build);
+  console.log(`  runs ${version_.format(st.version)}  owner ${st.owner.slice(0, 8)}…  line ${e.line}  pages ${params.extraPages}  schema ${params.schema.globalInts}/${params.schema.globalBytes}`);
+  console.log(`  rehearsing ${build.label} as v${target}: pages -> ${cost.extraPages}, wallet needs ${cost.spendable} spendable`);
+
+  const group = upgradeGroup({
+    owner: st.owner,
+    registry: st.registry,
+    passport: BigInt(id),
+    version: target,
+    line: e.line,
+    approvalProgram: build.approval,
+    clearProgram: build.clear,
+    params: await algod.getTransactionParams().do(),
+    currentExtraPages: params.extraPages,
+    schema: params.schema,
+  });
+  const res = await simulate.simulate(algod, group, { passportAppId: Number(id), build });
+  if (res.ok) {
+    check(true, 'the upgrade group passes the ledger AND the registry (version approved and permitted)');
+    return;
+  }
+  const atRegistry = res.app !== undefined && BigInt(res.app) === st.registry;
+  if (atRegistry) {
+    check(true, `passes the ledger; stops at the registry as expected pre-approval: ${res.failure.split('\n')[0].slice(0, 90)}`);
+    return;
+  }
+  check(false, `refused before the registry — a defect in the update itself: ${res.failure.split('\n')[0].slice(0, 110)}`);
+  if (res.reason) note(`passport assert: ${res.reason}`);
+}
+
 console.log(`algod: ${url}`);
 for (const t of targets) await report(t);
+if (passport) {
+  try {
+    await rehearseUpgrade(passport);
+  } catch (err) {
+    failures++;
+    console.log(`    FAIL rehearsal threw: ${err.message}`);
+  }
+}
 
 console.log(`\n${'='.repeat(74)}\nCOVERAGE\n${'='.repeat(74)}`);
 console.log(`  ${'registry'.padEnd(26)} ${'shape'.padEnd(8)} tier split`);

@@ -36,6 +36,7 @@ import {
   INDEX_BOX_MBR,
   OVERSIZED_PROGRAM_FEE,
   REG_BOX,
+  VERIFY_UPDATE_FEE,
 } from '../dist/constants.js';
 import { addrBox, boxName } from '../dist/encode.js';
 
@@ -316,6 +317,38 @@ test('an update sends its page count explicitly even when it does not grow', () 
   assert.equal(update.extraPages, EXTRA_PAGES);
   const bytes = Buffer.from(algosdk.encodeUnsignedTransaction(upgrade()[0]!));
   assert.ok(bytes.includes(Buffer.from('apep')));
+});
+
+test('an update RESTATES the schema on the wire — a missing one asks for 0/0', () => {
+  // Found by the front end on mainnet, not by a test: sending extraPages moves
+  // every update onto the ledger's size-change path, where the schema is
+  // whatever the transaction states. The generic builder carries one whether or
+  // not it is given, zero is omitted from the wire, and absent means "change to
+  // 0/0" — refused as "store integer count 8 exceeds schema integer count 0".
+  // The convenience builder never sent a schema either; it never sent pages, so
+  // it never took that path. Asserted on the encoded bytes, where alone it shows.
+  for (const g of [upgrade(), upgradeBig()]) {
+    const bytes = Buffer.from(algosdk.encodeUnsignedTransaction(g[0]!));
+    assert.ok(bytes.includes(Buffer.from('apgs')), 'the global schema is present in the encoded update');
+    const c = onWire(g[0]!);
+    assert.equal(c.numGlobalInts, GLOBAL_UINTS);
+    assert.equal(c.numGlobalByteSlices, GLOBAL_BYTES);
+    assert.equal(c.numLocalInts, 0);
+    assert.equal(c.numLocalByteSlices, 0);
+  }
+});
+
+test('an update restates the schema it was GIVEN, not the default', () => {
+  const g = upgradeBig({ schema: { globalInts: 14, globalBytes: 3, localInts: 1, localBytes: 1 } });
+  const c = onWire(g[0]!);
+  assert.equal(c.numGlobalInts, 14);
+  assert.equal(c.numGlobalByteSlices, 3);
+  assert.equal(c.numLocalInts, 1);
+  assert.equal(c.numLocalByteSlices, 1);
+});
+
+test('the verify_update fee is the constant the cost helper also counts', () => {
+  assert.equal(Number(upgradeBig()[1]!.fee), VERIFY_UPDATE_FEE);
 });
 
 test('an update never declares fewer pages than the passport already has', () => {

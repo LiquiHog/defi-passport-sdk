@@ -138,15 +138,38 @@ export type ProfitSpec =
       destQuoteAsset: Num;
     };
 
+/** An app's state schema, as frozen at creation. */
+export interface AppSchema {
+  globalInts: number;
+  globalBytes: number;
+  localInts: number;
+  localBytes: number;
+}
+
+/** What an app declares today: read before an update, and restated on it. */
+export interface AppParams {
+  extraPages: number;
+  schema: AppSchema;
+}
+
 /** What an in-place upgrade will cost the OWNER'S WALLET, before they sign. */
 export interface UpgradeCost {
   /** Extra pages the passport declares now. */
   currentExtraPages: number;
   /** Extra pages the update will declare — never below the current count. */
   extraPages: number;
+  /**
+   * The schema the passport declares now. Pass it to `upgradeGroup`: an update
+   * that changes the app's size must restate the schema, and one that omits it
+   * asks for 0/0.
+   */
+  schema: AppSchema;
   /** Minimum-balance increase, charged to the wallet in the update itself. */
   mbrIncrease: number;
-  /** The update transaction's fee. */
+  /**
+   * The fee for the WHOLE group — the update plus `verify_update`. The wallet
+   * pays both; counting only the update under-reports by `VERIFY_UPDATE_FEE`.
+   */
   fee: number;
   /** `mbrIncrease + fee`: what must be SPENDABLE at the moment of signing. */
   spendable: number;

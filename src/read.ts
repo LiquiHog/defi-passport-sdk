@@ -16,6 +16,7 @@ import {
   MBR_PER_EXTRA_PAGE,
   REG_BOX,
   RuleType,
+  VERIFY_UPDATE_FEE,
 } from './constants.js';
 import { extraPagesFor, programBytes, programFee } from './pages.js';
 import { addrBox, boxName, readU64 } from './encode.js';
@@ -27,6 +28,7 @@ import {
 } from './entitlement.js';
 import { lineOf } from './version.js';
 import type {
+  AppParams,
   GasAsset,
   Num,
   PassportState,
@@ -175,15 +177,34 @@ export const hex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 /**
- * The extra program pages an app declares today.
+ * What an app declares today: its extra pages and its state schema.
  *
- * Read this before building an upgrade and pass it through: an update carrying
- * fewer pages than the app has is accepted and shrinks it. Every passport was
- * created with `EXTRA_PAGES`, and stays there until a larger build grows it.
+ * READ BOTH BEFORE BUILDING AN UPGRADE AND PASS BOTH THROUGH. An update that
+ * carries a page count takes the ledger's size-change path, and on that path the
+ * schema is not "keep what you have" — it is whatever the transaction states,
+ * and a transaction that states nothing asks for 0/0. That refuses as
+ * "unable to change global schema: store integer count 8 exceeds schema integer
+ * count 0", which reads like a contract fault and is the builder's omission.
+ * Fewer pages than the app has is accepted and SHRINKS it, so that is passed
+ * through too.
  */
-export async function extraPages(algod: Algodv2, app: Num): Promise<number> {
+export async function appParams(algod: Algodv2, app: Num): Promise<AppParams> {
   const info = await algod.getApplicationByID(BigInt(app)).do();
-  return Number(info.params?.extraProgramPages ?? 0);
+  const p = info.params;
+  return {
+    extraPages: Number(p?.extraProgramPages ?? 0),
+    schema: {
+      globalInts: Number(p?.globalStateSchema?.numUint ?? 0),
+      globalBytes: Number(p?.globalStateSchema?.numByteSlice ?? 0),
+      localInts: Number(p?.localStateSchema?.numUint ?? 0),
+      localBytes: Number(p?.localStateSchema?.numByteSlice ?? 0),
+    },
+  };
+}
+
+/** The extra program pages an app declares today. See `appParams`. */
+export async function extraPages(algod: Algodv2, app: Num): Promise<number> {
+  return (await appParams(algod, app)).extraPages;
 }
 
 /**
@@ -201,12 +222,21 @@ export async function upgradeCost(
   passport: Num,
   build: { approval: Uint8Array; clear: Uint8Array },
 ): Promise<UpgradeCost> {
-  const currentExtraPages = await extraPages(algod, passport);
+  const { extraPages: currentExtraPages, schema } = await appParams(algod, passport);
   const bytes = programBytes(build);
   const pages = Math.max(currentExtraPages, extraPagesFor(bytes));
   const mbrIncrease = (pages - currentExtraPages) * MBR_PER_EXTRA_PAGE;
-  const fee = programFee(bytes);
-  return { currentExtraPages, extraPages: pages, mbrIncrease, fee, spendable: mbrIncrease + fee };
+  // THE WHOLE GROUP. The wallet signs and pays for both the update and the
+  // verify_update behind it; pricing the update alone under-reports by 1,000.
+  const fee = programFee(bytes) + VERIFY_UPDATE_FEE;
+  return {
+    currentExtraPages,
+    extraPages: pages,
+    schema,
+    mbrIncrease,
+    fee,
+    spendable: mbrIncrease + fee,
+  };
 }
 
 /**

@@ -25,11 +25,12 @@ import {
   GLOBAL_UINTS,
   INDEX_BOX_MBR,
   REG_BOX,
+  VERIFY_UPDATE_FEE,
 } from './constants.js';
 import { addrBox, boxName, u64 } from './encode.js';
 import { extraPagesFor, padBoxes, programBytes, programFee } from './pages.js';
 import { MAX_PROGRAM_OVERFLOW } from './programs.js';
-import type { Group, Num } from './types.js';
+import type { AppSchema, Group, Num } from './types.js';
 import { arc2 } from './note.js';
 
 /** algosdk computes a per-byte fee unless told otherwise. */
@@ -233,10 +234,29 @@ export function upgradeGroup(a: {
    * that has never been grown; pass the real value once one has.
    */
   currentExtraPages?: number | undefined;
+  /**
+   * The schema the passport declares TODAY, from `read.appParams` — restated on
+   * the update, because it has to be.
+   *
+   * Sending `extraPages` puts every update on the ledger's size-change path, and
+   * on that path the schema is not "keep what you have": it is whatever the
+   * transaction states, and stating nothing asks for 0/0. That refuses as "unable
+   * to change global schema: store integer count 8 exceeds schema integer count
+   * 0" — found by the front end against mainnet, not by a test, because the
+   * shape is only wrong on the wire and only on that path. The default is what
+   * every passport was created with; pass the real value once read.
+   */
+  schema?: AppSchema | undefined;
 }): Group {
   const registry = BigInt(a.registry);
   const bytes = programBytes({ approval: a.approvalProgram, clear: a.clearProgram });
   const extraPages = Math.max(a.currentExtraPages ?? EXTRA_PAGES, extraPagesFor(bytes));
+  const schema: AppSchema = a.schema ?? {
+    globalInts: GLOBAL_UINTS,
+    globalBytes: GLOBAL_BYTES,
+    localInts: 0,
+    localBytes: 0,
+  };
   // NOT `makeApplicationUpdateTxnFromObject`. That convenience builder omits
   // `extraPages` from its parameter type and DROPS it if passed anyway — no
   // error, no field on the wire — so an update that must grow the app would be
@@ -253,11 +273,18 @@ export function upgradeGroup(a: {
     approvalProgram: a.approvalProgram,
     clearProgram: a.clearProgram,
     extraPages,
+    // The generic builder carries a schema whether or not one is given, and a
+    // zero schema is omitted from the wire — which the size-change path reads as
+    // a request for 0/0. So it is stated, every time.
+    numGlobalInts: schema.globalInts,
+    numGlobalByteSlices: schema.globalBytes,
+    numLocalInts: schema.localInts,
+    numLocalByteSlices: schema.localBytes,
   });
   const verify = makeApplicationNoOpTxnFromObject({
     note: arc2('verify_update'),
     sender: a.owner,
-    suggestedParams: flat(a.params, 1000),
+    suggestedParams: flat(a.params, VERIFY_UPDATE_FEE),
     appIndex: registry,
     appArgs: [REGISTRY.verify_update.getSelector(), u64(a.version)],
     boxes: padBoxes(

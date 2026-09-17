@@ -173,15 +173,29 @@ before an owner signs:
 
 ```ts
 const cost = await read.upgradeCost(algod, passportId, build);
-// { currentExtraPages: 3, extraPages: 5, mbrIncrease: 200_000, fee: 2000, spendable: 202_000 }
+// { currentExtraPages: 3, extraPages: 5, schema: {...}, mbrIncrease: 200_000, fee: 3000, spendable: 203_000 }
+
+const group = upgradeGroup({
+  owner, registry, passport: passportId, version, line,
+  approvalProgram: build.approval, clearProgram: build.clear, params,
+  currentExtraPages: cost.currentExtraPages,
+  schema: cost.schema,
+});
 ```
 
 Growing pages raises minimum balance by 100,000 uALGO each, charged to the
-OWNER'S WALLET in the update transaction itself — never to the passport — so the
-wallet needs `spendable` available at that moment or the update fails with a
-balance error that reads like nothing to do with pages. Pass
-`cost.currentExtraPages` to `upgradeGroup`; it never declares fewer than the
-passport already has, because a smaller count is accepted and shrinks the app.
+OWNER'S WALLET in the update transaction itself — never to the passport — and the
+wallet pays the fees of the whole group, the update and the `verify_update`
+behind it. So it needs `spendable` available at the moment of signing or the
+update fails with a balance error that reads like nothing to do with pages.
+
+Pass `currentExtraPages` and `schema` straight through. The first because an
+update declaring fewer pages than the passport has is accepted and shrinks it.
+The second because an update that carries a page count takes the ledger's
+size-change path, where the schema is not "keep what you have" but whatever the
+transaction states — and stating nothing asks for 0/0, refused as "store integer
+count 8 exceeds schema integer count 0". Both default to what every passport was
+created with, so a passport that has never been grown is safe without them.
 
 The other two are automatic. The one transaction carrying an oversized program
 pays a surcharge, and — the part that is not intuitive — **every later call to

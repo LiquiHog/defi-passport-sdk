@@ -236,5 +236,13 @@ export const REMOVE_ENTRY_FEE = 3000;
 /** `optin` issues one inner asset transfer. */
 export const OPTIN_FEE = 2000;
 
+/**
+ * `verify_update`'s fee. The owner's wallet pays for the WHOLE upgrade group —
+ * this plus the update transaction's own — so anything pricing an upgrade must
+ * count both. `read.upgradeCost` does; a caller adding the update fee alone
+ * under-reports by exactly this.
+ */
+export const VERIFY_UPDATE_FEE = 1000;
+
 /** Group-wide reference budget. Boxes, assets, apps and accounts all share it. */
 export const MAX_REFS_PER_TXN = 8;
