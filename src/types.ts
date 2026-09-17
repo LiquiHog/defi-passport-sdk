@@ -86,6 +86,34 @@ export interface Position {
   legs: Uint8Array; // 2 x [valAsset, rateNum, rateDen]
 }
 
+/**
+ * A strategy's profit routing (`sp`+sid, 40 B). Absent means none: every fill's
+ * proceeds stay in the strategy, which is what every passport did before v1.1.2.
+ */
+export interface ProfitRouting {
+  /** `rate`: `value` is basis points of net proceeds. `fixed`: an amount, capped at the net. */
+  mode: 'rate' | 'fixed';
+  value: bigint;
+  /** Where the skim goes: the owner, another strategy's quote reserve, or the ALGO gas lock. */
+  kind: 'owner' | 'reserve' | 'gas';
+  /** The receiving strategy. Meaningful only when `kind` is `reserve`. */
+  destSid: bigint;
+}
+
+/** What an in-place upgrade will cost the OWNER'S WALLET, before they sign. */
+export interface UpgradeCost {
+  /** Extra pages the passport declares now. */
+  currentExtraPages: number;
+  /** Extra pages the update will declare — never below the current count. */
+  extraPages: number;
+  /** Minimum-balance increase, charged to the wallet in the update itself. */
+  mbrIncrease: number;
+  /** The update transaction's fee. */
+  fee: number;
+  /** `mbrIncrease + fee`: what must be SPENDABLE at the moment of signing. */
+  spendable: number;
+}
+
 /** What the directory publishes. Only `router` and `budget` are contract-read. */
 export interface DirectoryEntries {
   router: bigint;

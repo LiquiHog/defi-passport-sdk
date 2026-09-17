@@ -15,7 +15,7 @@
     "build": "tsc",
     "typecheck": "tsc && tsc -p tsconfig.test.json",
     "prepare": "tsc",
-    "test": "tsc && node --test --experimental-strip-types test/entitlement.test.ts test/gascap.test.ts test/programs.test.ts test/swap.test.ts test/create.test.ts",
+    "test": "tsc && node --test --experimental-strip-types test/entitlement.test.ts test/gascap.test.ts test/programs.test.ts test/swap.test.ts test/create.test.ts test/pages.test.ts test/padding.test.ts test/profit.test.ts",
     "live-check": "tsc && node scripts/live-check.mjs"
   },
   "dependencies": {

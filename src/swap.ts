@@ -58,6 +58,8 @@ import { PASSPORT } from './abi.js';
 import { BOX, MAX_REFS_PER_TXN } from './constants.js';
 import { abiBytes, boxName, concat, u64 } from './encode.js';
 import { flat } from './create.js';
+import { padBoxes } from './pages.js';
+import { MAX_PROGRAM_OVERFLOW } from './programs.js';
 import { arc2 } from './note.js';
 import type { Group, Num, PassportCtx } from './types.js';
 
@@ -247,9 +249,12 @@ function spread(all: Slot[], selfApp: bigint): Slot[][] {
   for (const s of all) {
     if (s.kind !== 'box') continue;
     const app = BigInt(s.v.appIndex);
-    const needs = app !== selfApp && !appsHere.has(app) ? 2 : 1;
+    // App 0 is the called app itself, which is how an EMPTY reference is
+    // written; neither it nor a box on the passport needs a companion.
+    const foreign = app !== 0n && app !== selfApp;
+    const needs = foreign && !appsHere.has(app) ? 2 : 1;
     if (cur.length + needs > MAX_REFS_PER_TXN) flush();
-    if (app !== selfApp && !appsHere.has(app)) {
+    if (foreign && !appsHere.has(app)) {
       cur.push({ kind: 'app', v: app });
       appsHere.add(app);
       placed.add(app);
@@ -325,7 +330,9 @@ export function swapGroup(ctx: PassportCtx, a: SwapArgs): Group {
   const blob = packSession(a.session);
   const res = sessionResources(ctx, a);
   const slots: Slot[] = [
-    ...res.boxes.map((v) => ({ kind: 'box', v }) as Slot),
+    // Padded as a set: the group is budgeted as a whole, and the spill puts
+    // any empties wherever there is room.
+    ...padBoxes(res.boxes, MAX_PROGRAM_OVERFLOW).map((v) => ({ kind: 'box', v }) as Slot),
     ...res.apps.map((v) => ({ kind: 'app', v }) as Slot),
     ...res.assets.map((v) => ({ kind: 'asset', v }) as Slot),
     ...res.accounts.map((v) => ({ kind: 'account', v }) as Slot),

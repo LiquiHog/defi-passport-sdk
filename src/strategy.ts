@@ -23,6 +23,8 @@ import {
 } from './constants.js';
 import { abiBytes, boxName, u64, u64List } from './encode.js';
 import { flat } from './create.js';
+import { padBoxes } from './pages.js';
+import { MAX_PROGRAM_OVERFLOW } from './programs.js';
 import type { Group, Num, PassportCtx } from './types.js';
 import { arc2 } from './note.js';
 
@@ -50,15 +52,22 @@ function call(
     fee?: number | undefined;
     /** Extra ARC-2 note fields, merged over the method label. */
     note?: Record<string, Num | string> | undefined;
+    /**
+     * False for a member of a group that budgets its references as a whole —
+     * padding each member separately could push one past the slot limit, and
+     * a group with three or more real boxes needs nothing added anyway.
+     */
+    pad?: boolean | undefined;
   } = {},
 ): Transaction {
+  const boxes = o.pad === false ? (o.boxes ?? []) : padBoxes(o.boxes ?? [], MAX_PROGRAM_OVERFLOW);
   return makeApplicationNoOpTxnFromObject({
     sender: ctx.owner,
     suggestedParams: flat(ctx.params, o.fee ?? 1000),
     appIndex: BigInt(ctx.passport),
     appArgs: [method.getSelector(), ...args],
     note: arc2(method.name, o.note ?? {}),
-    ...(o.boxes ? { boxes: o.boxes } : {}),
+    ...(boxes.length ? { boxes } : {}),
     ...(o.apps ? { foreignApps: o.apps.map(Number) } : {}),
     ...(o.assets ? { foreignAssets: o.assets.map(Number) } : {}),
   });
@@ -314,9 +323,16 @@ export function closeStrategyGroup(
   const p = BigInt(ctx.passport);
   const refs: BoxReference[] = [
     { appIndex: p, name: boxName(BOX.strategy, a.sid) },
+    // The profit-routing box. Read on close from v1.1.2, so it must be named
+    // even where it does not exist — a reference to an absent box is legal, a
+    // missing reference to a present one is "invalid Box reference".
+    { appIndex: p, name: boxName(BOX.profit, a.sid) },
     ...a.ruleIds.map((r) => ({ appIndex: p, name: boxName(BOX.rule, a.sid, r) })),
     ...[...new Set([0, ...a.assets.map(Number)])].map((x) => cm(p, x)),
   ];
+  // Three real boxes at minimum (strategy, profit, cm+0), which meets the read
+  // budget of any build this SDK bundles on its own. Members therefore do not
+  // pad themselves: the head is sized to the slot limit and cannot take more.
   const fassets = assetRefs(...a.assets);
   const head = Math.max(1, MAX_REFS_PER_TXN - fassets.length);
 
@@ -325,11 +341,16 @@ export function closeStrategyGroup(
       boxes: refs.slice(0, head),
       assets: fassets,
       fee: 2000,
+      pad: false,
     }),
   ];
   for (let i = head; i < refs.length; i += MAX_REFS_PER_TXN) {
     txns.push(
-      call(ctx, PASSPORT.ping, [], { boxes: refs.slice(i, i + MAX_REFS_PER_TXN), fee: 0 }),
+      call(ctx, PASSPORT.ping, [], {
+        boxes: refs.slice(i, i + MAX_REFS_PER_TXN),
+        fee: 0,
+        pad: false,
+      }),
     );
   }
   return txns.length > 1 ? assignGroupID(txns) : txns;

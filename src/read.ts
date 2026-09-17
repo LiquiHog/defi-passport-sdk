@@ -13,9 +13,11 @@ import {
   BOX,
   GAS_CAP_DEFAULT,
   GAS_CAP_SINCE,
+  MBR_PER_EXTRA_PAGE,
   REG_BOX,
   RuleType,
 } from './constants.js';
+import { extraPagesFor, programBytes, programFee } from './pages.js';
 import { addrBox, boxName, readU64 } from './encode.js';
 import {
   resolveLine,
@@ -24,7 +26,15 @@ import {
   type RegistryShape,
 } from './entitlement.js';
 import { lineOf } from './version.js';
-import type { Num, PassportState, Position, Rule, Strategy } from './types.js';
+import type {
+  Num,
+  PassportState,
+  Position,
+  ProfitRouting,
+  Rule,
+  Strategy,
+  UpgradeCost,
+} from './types.js';
 
 const TXT = new TextDecoder();
 
@@ -150,6 +160,69 @@ export async function boxes(algod: Algodv2, app: Num): Promise<Map<string, Uint8
 
 export const hex = (b: Uint8Array): string =>
   Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+
+/**
+ * The extra program pages an app declares today.
+ *
+ * Read this before building an upgrade and pass it through: an update carrying
+ * fewer pages than the app has is accepted and shrinks it. Every passport was
+ * created with `EXTRA_PAGES`, and stays there until a larger build grows it.
+ */
+export async function extraPages(algod: Algodv2, app: Num): Promise<number> {
+  const info = await algod.getApplicationByID(BigInt(app)).do();
+  return Number(info.params?.extraProgramPages ?? 0);
+}
+
+/**
+ * What upgrading to `build` costs the owner's wallet — ASK BEFORE THEY SIGN.
+ *
+ * Growing an app's pages raises minimum balance by `MBR_PER_EXTRA_PAGE` each,
+ * and the ledger charges it to the account that sends the update, which for a
+ * passport is the owner's own wallet — never the passport's escrow. It is applied
+ * in the update transaction itself, so the wallet needs `spendable` available at
+ * that moment or the update fails with a balance error that reads like nothing
+ * to do with pages. A build that fits the current pages costs only its fee.
+ */
+export async function upgradeCost(
+  algod: Algodv2,
+  passport: Num,
+  build: { approval: Uint8Array; clear: Uint8Array },
+): Promise<UpgradeCost> {
+  const currentExtraPages = await extraPages(algod, passport);
+  const bytes = programBytes(build);
+  const pages = Math.max(currentExtraPages, extraPagesFor(bytes));
+  const mbrIncrease = (pages - currentExtraPages) * MBR_PER_EXTRA_PAGE;
+  const fee = programFee(bytes);
+  return { currentExtraPages, extraPages: pages, mbrIncrease, fee, spendable: mbrIncrease + fee };
+}
+
+/**
+ * Decode an `sp`+sid box. Fixed 40 bytes, five u64 slots, the last reserved.
+ *
+ * The box is written by `set_profit` and deleted by calling it with destination
+ * kind 0, so a caller reading routing back should treat ABSENT as the answer
+ * "none", not as an error — see `profit`.
+ */
+export function decodeProfit(raw: Uint8Array): ProfitRouting {
+  if (raw.length !== 40) throw new Error(`profit box is ${raw.length} B, expected 40`);
+  const modes = ['rate', 'fixed'] as const;
+  const kinds = [undefined, 'owner', 'reserve', 'gas'] as const;
+  const mode = modes[Number(readU64(raw, 0))];
+  const kind = kinds[Number(readU64(raw, 16))];
+  if (mode === undefined) throw new Error(`unknown profit skim mode ${readU64(raw, 0)}`);
+  if (kind === undefined) throw new Error(`unknown profit destination kind ${readU64(raw, 16)}`);
+  return { mode, value: readU64(raw, 8), kind, destSid: readU64(raw, 24) };
+}
+
+/** A strategy's profit routing, or null when none is set. */
+export async function profit(
+  algod: Algodv2,
+  passport: Num,
+  sid: Num,
+): Promise<ProfitRouting | null> {
+  const raw = await boxValue(algod, passport, boxName(BOX.profit, sid));
+  return raw ? decodeProfit(raw) : null;
+}
 
 /**
  * ONE box by name, or null if it does not exist.

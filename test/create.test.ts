@@ -29,7 +29,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import algosdk from 'algosdk';
 import { createGroup, linkGroup, upgradeGroup } from '../dist/index.js';
-import { EXTRA_PAGES, GLOBAL_BYTES, GLOBAL_UINTS, INDEX_BOX_MBR, REG_BOX } from '../dist/constants.js';
+import {
+  EXTRA_PAGES,
+  GLOBAL_BYTES,
+  GLOBAL_UINTS,
+  INDEX_BOX_MBR,
+  OVERSIZED_PROGRAM_FEE,
+  REG_BOX,
+} from '../dist/constants.js';
 import { addrBox, boxName } from '../dist/encode.js';
 
 const PARAMS = {
@@ -258,5 +265,105 @@ test('all three groups pass the line through unchanged', () => {
   ] as const) {
     const head = (g[i]!.applicationCall?.boxes ?? []).find((b) => b.name[0] === 0x68);
     assert.equal(hex(head!.name), want, `${name} must name h + u64(${LINE})`);
+  }
+});
+
+// ── pages and fees follow the program ───────────────────────────────────────
+//
+// Consensus v42 lifted the 8,192-byte cap. A build over it has to declare more
+// extra pages and pay a surcharge on the ONE transaction carrying it — and the
+// convenience builder algosdk offers for updates silently DROPS extraPages, so
+// the assertion that matters here is on the encoded bytes, not on the object.
+
+const BIG_APPROVAL = new Uint8Array(10_588); // v1.1.2's size, six pages
+const BIG_CLEAR = new Uint8Array(4);
+
+/** The field as it will reach the node — after encoding, not before. */
+const onWire = (t: algosdk.Transaction) =>
+  algosdk.decodeUnsignedTransaction(algosdk.encodeUnsignedTransaction(t)).applicationCall!;
+
+const upgradeBig = (over: Record<string, unknown> = {}) =>
+  upgradeGroup({
+    owner: OWNER,
+    registry: REGISTRY,
+    passport: PASSPORT,
+    version: 1_001_002n,
+    line: LINE,
+    approvalProgram: BIG_APPROVAL,
+    clearProgram: BIG_CLEAR,
+    params: PARAMS,
+    ...over,
+  });
+
+test('an update carrying an oversized program declares five extra pages ON THE WIRE', () => {
+  const update = onWire(upgradeBig()[0]!);
+  assert.equal(update.onComplete, algosdk.OnApplicationComplete.UpdateApplicationOC);
+  assert.equal(update.extraPages, 5, 'apep must survive encoding');
+  // Belt and braces: the field name itself is in the bytes.
+  const bytes = Buffer.from(algosdk.encodeUnsignedTransaction(upgradeBig()[0]!));
+  assert.ok(bytes.includes(Buffer.from('apep')), 'the apep field is present in the encoded transaction');
+});
+
+test('an update carrying an oversized program pays the surcharge; a small one does not', () => {
+  assert.equal(Number(upgradeBig()[0]!.fee), OVERSIZED_PROGRAM_FEE);
+  assert.equal(Number(upgrade()[0]!.fee), 1000);
+});
+
+test('an update sends its page count explicitly even when it does not grow', () => {
+  // A bare update keeps the app's current pages, so omitting the field would
+  // work today — and would hide the drop the moment a build needs more.
+  const update = onWire(upgrade()[0]!);
+  assert.equal(update.extraPages, EXTRA_PAGES);
+  const bytes = Buffer.from(algosdk.encodeUnsignedTransaction(upgrade()[0]!));
+  assert.ok(bytes.includes(Buffer.from('apep')));
+});
+
+test('an update never declares fewer pages than the passport already has', () => {
+  // A smaller count is accepted by the ledger and SHRINKS the app. The builder
+  // takes the current count and floors at it.
+  const grownThenSmallBuild = upgradeGroup({
+    owner: OWNER,
+    registry: REGISTRY,
+    passport: PASSPORT,
+    version: VERSION,
+    line: LINE,
+    approvalProgram: APPROVAL,
+    clearProgram: CLEAR,
+    params: PARAMS,
+    currentExtraPages: 5,
+  });
+  assert.equal(onWire(grownThenSmallBuild[0]!).extraPages, 5);
+  // and the floor still applies below it
+  assert.equal(onWire(upgradeBig({ currentExtraPages: 2 })[0]!).extraPages, 5);
+  assert.equal(onWire(upgradeBig({ currentExtraPages: 6 })[0]!).extraPages, 6);
+});
+
+test('creating on an oversized program declares five pages and pays the surcharge', () => {
+  const g = create({ approvalProgram: BIG_APPROVAL, clearProgram: BIG_CLEAR });
+  const c = onWire(g[1]!);
+  assert.equal(c.extraPages, 5);
+  assert.equal(Number(g[1]!.fee), OVERSIZED_PROGRAM_FEE);
+  // the other two members are unaffected
+  assert.equal(Number(g[0]!.fee), 1000);
+  assert.equal(Number(g[2]!.fee), 1000);
+});
+
+test('creating on a small program is exactly what every existing passport got', () => {
+  const g = create();
+  assert.equal(onWire(g[1]!).extraPages, EXTRA_PAGES);
+  assert.equal(Number(g[1]!.fee), 1000);
+});
+
+test('the registry calls in every group already buy the read budget with real boxes', () => {
+  // Four, four and three real references: at or above the need for any bundled
+  // build, so no empties appear and nothing changes for stable owners.
+  for (const [name, t, expectReal] of [
+    ['create_entry', create()[2]!, 4],
+    ['link_passport', link()[1]!, 4],
+    ['verify_update', upgrade()[1]!, 3],
+  ] as const) {
+    const boxes = t.applicationCall?.boxes ?? [];
+    assert.equal(boxes.filter((b) => b.name.length > 0).length, expectReal, name);
+    assert.ok(boxes.length >= boxes.filter((b) => b.name.length > 0).length, name);
   }
 });

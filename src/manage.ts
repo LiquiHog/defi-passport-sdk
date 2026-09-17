@@ -8,6 +8,8 @@ import { PASSPORT } from './abi.js';
 import { BOX, GAS_CAP_MAX, OPTIN_FEE } from './constants.js';
 import { abiBytes, boxName, concat, u64 } from './encode.js';
 import { flat } from './create.js';
+import { padBoxes } from './pages.js';
+import { MAX_PROGRAM_OVERFLOW } from './programs.js';
 import type { Num, PassportCtx } from './types.js';
 import { arc2 } from './note.js';
 
@@ -31,11 +33,18 @@ function call(
     appIndex: BigInt(ctx.passport),
     appArgs: [method.getSelector(), ...args],
     note: arc2(method.name),
-    ...(o.boxes ? { boxes: o.boxes } : {}),
+    // Every call touching a passport pays a read budget sized by the largest
+    // bundled program, box or no box. See pages.ts; a no-op until one is large.
+    ...pad(o.boxes ?? []),
     ...(o.apps ? { foreignApps: o.apps.map(Number) } : {}),
     ...(o.assets ? { foreignAssets: o.assets.map(Number) } : {}),
   });
 }
+
+const pad = (boxes: BoxReference[]): { boxes?: BoxReference[] } => {
+  const padded = padBoxes(boxes, MAX_PROGRAM_OVERFLOW);
+  return padded.length ? { boxes: padded } : {};
+};
 
 const cmBox = (p: bigint, asset: Num): BoxReference => ({
   appIndex: p,

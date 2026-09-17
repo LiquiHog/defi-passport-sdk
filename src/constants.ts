@@ -30,7 +30,49 @@
  */
 export const GLOBAL_UINTS = 12;
 export const GLOBAL_BYTES = 2;
-export const EXTRA_PAGES = 3; // 4 pages total = 8192 B, the AVM maximum
+/**
+ * The FLOOR on extra pages, not the ceiling it used to be. Consensus v42 lifted
+ * the 8,192-byte program cap, so a large build declares more — `pages.extraPagesFor`
+ * derives it — but never fewer than every existing passport was created with.
+ */
+export const EXTRA_PAGES = 3;
+
+/**
+ * The 2,048-byte page `extraPages` and minimum-balance count in. NOT the
+ * 4,096-byte page the registry hashes programs with (`HASH_PAGE_BYTES`).
+ */
+export const PROGRAM_PAGE_BYTES = 2048;
+
+/**
+ * The program cap before consensus v42. Lifted for storage, but the AVM still
+ * charges its READ BUDGET against this number for every app — so a program over
+ * it needs box references on every call, empty ones included. See `pages.ts`.
+ */
+export const LEGACY_PROGRAM_CAP = 8192;
+
+/**
+ * Fee for the one transaction that carries a program over `LEGACY_PROGRAM_CAP`.
+ * A per-byte surcharge in consensus; measured minimum about 1,100 for a 9.3 KB
+ * program, so this is a flat cover rather than a computed one.
+ */
+export const OVERSIZED_PROGRAM_FEE = 2000;
+
+/**
+ * Minimum balance each extra page costs, charged to the CREATOR — for a passport
+ * that is the owner's wallet, never the passport's own account — and applied in
+ * the create or update transaction itself. Growing 3 -> 5 costs the owner
+ * 200,000 spendable at the moment they sign, or the update fails.
+ */
+export const MBR_PER_EXTRA_PAGE = 100_000;
+
+/** Read budget one box reference buys. */
+export const READ_BUDGET_PER_BOX_REF = 1024;
+
+/**
+ * The size every named box is counted at when sizing a group's read budget. A
+ * bound: the largest passport box is a balancer rule at about 104 bytes.
+ */
+export const BOX_READ_BOUND = 128;
 
 /**
  * What registration costs, paid by whoever creates the passport.
@@ -57,6 +99,7 @@ export const BOX = {
   rule: 'sr', //     sr + sid + rule_id  one rule
   committed: 'cm', //cm + asset          the committed ledger
   position: 'p', //  p  + asset          locked funds + valuation legs
+  profit: 'sp', //   sp + sid            profit routing (40 B); absent = none
 } as const;
 
 /** Registry box prefixes. */

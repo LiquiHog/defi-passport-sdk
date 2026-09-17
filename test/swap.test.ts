@@ -94,6 +94,10 @@ function assertWellFormed(group: algosdk.Transaction[]) {
     assert.ok(accounts.length <= 4, `txn ${i} has ${accounts.length} accounts, limit 4`);
 
     for (const b of boxes) {
+      // An EMPTY reference names nothing and belongs to no app — it exists to
+      // buy read budget once an oversized build is bundled. Only a named box
+      // needs its app alongside it.
+      if (b.name.length === 0) continue;
       const app = BigInt(b.appIndex);
       assert.ok(
         app === BigInt(PASSPORT) || apps.includes(app),

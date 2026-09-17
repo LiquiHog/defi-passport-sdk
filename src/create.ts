@@ -10,9 +10,9 @@
 import {
   assignGroupID,
   getApplicationAddress,
+  makeApplicationCallTxnFromObject,
   makeApplicationCreateTxnFromObject,
   makeApplicationNoOpTxnFromObject,
-  makeApplicationUpdateTxnFromObject,
   makePaymentTxnWithSuggestedParamsFromObject,
   OnApplicationComplete,
   type SuggestedParams,
@@ -27,6 +27,8 @@ import {
   REG_BOX,
 } from './constants.js';
 import { addrBox, boxName, u64 } from './encode.js';
+import { extraPagesFor, padBoxes, programBytes, programFee } from './pages.js';
+import { MAX_PROGRAM_OVERFLOW } from './programs.js';
 import type { Group, Num } from './types.js';
 import { arc2 } from './note.js';
 
@@ -96,10 +98,14 @@ export function createGroup(a: CreateArgs): Group {
     suggestedParams: flat(a.params, 1000),
   });
 
+  // Pages and fee follow the PROGRAM, floored at what every passport has always
+  // declared. A build over the legacy cap needs more pages and pays the v42
+  // surcharge on this one transaction; a build under it gets today's numbers.
+  const bytes = programBytes({ approval: a.approvalProgram, clear: a.clearProgram });
   const create = makeApplicationCreateTxnFromObject({
     note: arc2('create'),
     sender: a.owner,
-    suggestedParams: flat(a.params, 1000),
+    suggestedParams: flat(a.params, programFee(bytes)),
     onComplete: OnApplicationComplete.NoOpOC,
     approvalProgram: a.approvalProgram,
     clearProgram: a.clearProgram,
@@ -107,7 +113,7 @@ export function createGroup(a: CreateArgs): Group {
     numGlobalByteSlices: GLOBAL_BYTES,
     numLocalInts: 0,
     numLocalByteSlices: 0,
-    extraPages: EXTRA_PAGES,
+    extraPages: extraPagesFor(bytes),
     appArgs: [PASSPORT.create.getSelector(), u64(registry), u64(testing)],
   });
 
@@ -117,12 +123,15 @@ export function createGroup(a: CreateArgs): Group {
     suggestedParams: flat(a.params, 1000),
     appIndex: registry,
     appArgs: [REGISTRY.create_entry.getSelector()],
-    boxes: [
-      { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.version, a.entitledVersion) },
-      { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, a.entitledLine) },
-    ],
+    boxes: padBoxes(
+      [
+        { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
+        { appIndex: registry, name: boxName(REG_BOX.version, a.entitledVersion) },
+        { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
+        { appIndex: registry, name: boxName(REG_BOX.head, a.entitledLine) },
+      ],
+      MAX_PROGRAM_OVERFLOW,
+    ),
     ...(a.previousPassport ? { foreignApps: [Number(a.previousPassport)] } : {}),
   });
 
@@ -178,15 +187,18 @@ export function linkGroup(a: {
     suggestedParams: flat(a.params, 1000),
     appIndex: registry,
     appArgs: [REGISTRY.link_passport.getSelector(), u64(passport), u64(a.version)],
-    boxes: [
-      { appIndex: registry, name: boxName(REG_BOX.passport, passport) },
-      { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
-      // `link_passport` re-runs the tier gate, so it needs the entitlement
-      // boxes too. Missing them reads as "invalid Box reference", not as a
-      // permission error.
-      { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
-    ],
+    boxes: padBoxes(
+      [
+        { appIndex: registry, name: boxName(REG_BOX.passport, passport) },
+        { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
+        // `link_passport` re-runs the tier gate, so it needs the entitlement
+        // boxes too. Missing them reads as "invalid Box reference", not as a
+        // permission error.
+        { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
+        { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
+      ],
+      MAX_PROGRAM_OVERFLOW,
+    ),
   });
 
   return assignGroupID([confirm, link]);
@@ -212,15 +224,35 @@ export function upgradeGroup(a: {
   approvalProgram: Uint8Array;
   clearProgram: Uint8Array;
   params: SuggestedParams;
+  /**
+   * The extra pages the passport declares TODAY, from `read.extraPages`.
+   *
+   * Never send fewer than it has. An update carrying a smaller count is accepted
+   * and SHRINKS the app, which nobody upgrading intends. The default is the floor
+   * every passport was created with, so omitting this is safe for any passport
+   * that has never been grown; pass the real value once one has.
+   */
+  currentExtraPages?: number | undefined;
 }): Group {
   const registry = BigInt(a.registry);
-  const update: Transaction = makeApplicationUpdateTxnFromObject({
+  const bytes = programBytes({ approval: a.approvalProgram, clear: a.clearProgram });
+  const extraPages = Math.max(a.currentExtraPages ?? EXTRA_PAGES, extraPagesFor(bytes));
+  // NOT `makeApplicationUpdateTxnFromObject`. That convenience builder omits
+  // `extraPages` from its parameter type and DROPS it if passed anyway — no
+  // error, no field on the wire — so an update that must grow the app would be
+  // built, signed and refused on chain. Verified at the byte level; the generic
+  // builder with an UpdateApplication completion carries it. An update sent
+  // without the field keeps the app's current pages, which is why the old
+  // builder never failed while every program fit.
+  const update: Transaction = makeApplicationCallTxnFromObject({
     note: arc2('update'),
     sender: a.owner,
-    suggestedParams: flat(a.params, 1000),
+    suggestedParams: flat(a.params, programFee(bytes)),
     appIndex: BigInt(a.passport),
+    onComplete: OnApplicationComplete.UpdateApplicationOC,
     approvalProgram: a.approvalProgram,
     clearProgram: a.clearProgram,
+    extraPages,
   });
   const verify = makeApplicationNoOpTxnFromObject({
     note: arc2('verify_update'),
@@ -228,11 +260,14 @@ export function upgradeGroup(a: {
     suggestedParams: flat(a.params, 1000),
     appIndex: registry,
     appArgs: [REGISTRY.verify_update.getSelector(), u64(a.version)],
-    boxes: [
-      { appIndex: registry, name: boxName(REG_BOX.version, a.version) },
-      { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
-    ],
+    boxes: padBoxes(
+      [
+        { appIndex: registry, name: boxName(REG_BOX.version, a.version) },
+        { appIndex: registry, name: addrBox(REG_BOX.beta, a.owner) },
+        { appIndex: registry, name: boxName(REG_BOX.head, a.line) },
+      ],
+      MAX_PROGRAM_OVERFLOW,
+    ),
   });
   return assignGroupID([update, verify]);
 }

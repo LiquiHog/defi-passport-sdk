@@ -47,6 +47,10 @@ export * as teardown from './teardown.js';
 export * as programs from './programs.js';
 export * as simulate from './simulate.js';
 export * as version from './version.js';
+// Program size and what follows from it: pages, the oversized-program fee, and
+// the read budget that makes every call name box references once a program is
+// over the legacy cap. Builders apply it; this is here for callers sizing UIs.
+export * as pages from './pages.js';
 // A deposit is a bare transfer with no application call, so nothing on chain says
 // it was a deposit unless you attach a note. `deposit` and `note` ship together for
 // that reason: use them as a pair if you want your own history to be readable.

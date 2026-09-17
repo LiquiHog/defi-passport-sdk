@@ -18,6 +18,8 @@ import { PASSPORT, REGISTRY } from './abi.js';
 import { REG_BOX, REMOVE_ENTRY_FEE } from './constants.js';
 import { abiBytes, addrBox, boxName, keyList, u64, u64List } from './encode.js';
 import { flat } from './create.js';
+import { padBoxes } from './pages.js';
+import { MAX_PROGRAM_OVERFLOW } from './programs.js';
 import type { Group, Num } from './types.js';
 import { arc2 } from './note.js';
 
@@ -47,6 +49,9 @@ export function destroy(a: {
     throw new RangeError('asset 0 must not be listed — ALGO is closed separately');
   }
   const p = BigInt(a.passport);
+  // Deletion reads the program like any other call, so it pays the read budget
+  // too — a passport with no boxes left still needs the empty references.
+  const boxes = padBoxes(a.boxNames.map((name) => ({ appIndex: p, name })), MAX_PROGRAM_OVERFLOW);
   return makeApplicationCallTxnFromObject({
     note: arc2('destroy'),
     sender: a.owner,
@@ -59,9 +64,7 @@ export function destroy(a: {
       abiBytes(keyList(a.boxNames)),
     ],
     ...(a.assets.length ? { foreignAssets: a.assets.map(Number) } : {}),
-    ...(a.boxNames.length
-      ? { boxes: a.boxNames.map((name) => ({ appIndex: p, name })) }
-      : {}),
+    ...(boxes.length ? { boxes } : {}),
   });
 }
 
@@ -94,10 +97,15 @@ export function removeEntry(a: {
     // requires it named, and the miss is "unavailable App <id>", which reads as a
     // registry fault and is really this caller requirement.
     foreignApps: [Number(a.passport)],
-    boxes: [
-      { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
-      { appIndex: registry, name: boxName(REG_BOX.passport, a.passport) },
-    ],
+    // This call resolves the passport's params, so the group touches it and
+    // pays its read budget. Registry boxes count toward that like any other.
+    boxes: padBoxes(
+      [
+        { appIndex: registry, name: addrBox(REG_BOX.owner, a.owner) },
+        { appIndex: registry, name: boxName(REG_BOX.passport, a.passport) },
+      ],
+      MAX_PROGRAM_OVERFLOW,
+    ),
   });
 }
 

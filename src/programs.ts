@@ -32,6 +32,7 @@ import { HASH_PAGE_BYTES, REG_BOX } from './constants.js';
 import { boxName, pageHash, readU64 } from './encode.js';
 import { GENERATED, type GeneratedBuild } from './programs.gen.js';
 import { boxValue, globals, hex } from './read.js';
+import { programBytes, programOverflow } from './pages.js';
 import { betaHeadLine, reachableVersions, type ReachableVersion } from './entitlement.js';
 import type { Num } from './types.js';
 
@@ -127,6 +128,22 @@ export const BUILDS: Readonly<Record<BuildLabel, Build>> = Object.fromEntries(
 
 /** Every bundled build, for callers that must search rather than choose. */
 export const ALL_BUILDS: readonly Build[] = Object.values(BUILDS);
+
+/**
+ * The read-budget overflow of the LARGEST bundled build — what every builder
+ * pads box references for.
+ *
+ * Derived, not declared, and from the bundle rather than from any one registry:
+ * a builder cannot see which version a passport runs, one release serves every
+ * version it bundles, and a passport created fresh on the largest build pays the
+ * same budget as one upgraded to it. So the bundle sets the worst case. While
+ * every bundled program is under the legacy cap this is 0 and padding does
+ * nothing; bundling a larger build turns it on without any other change.
+ */
+export const MAX_PROGRAM_OVERFLOW: number = Math.max(
+  0,
+  ...ALL_BUILDS.map((b) => programOverflow(programBytes(b))),
+);
 
 async function storedHashes(
   algod: Algodv2,
