@@ -89,7 +89,7 @@ const F = (name: string, offset: number, kind: FieldKind): TailField => ({
  * denominated. A grid "template" can only be the RATIOS between those amounts
  * plus a size, which is a derivation the caller does — not a copy.
  */
-export const RULE_LAYOUT: Readonly<Record<RuleType, TailLayout>> = {
+export const RULE_LAYOUT: Readonly<Partial<Record<RuleType, TailLayout>>> = {
   [RuleType.Schedule]: {
     type: RuleType.Schedule,
     length: 64,
@@ -161,7 +161,11 @@ export const RULE_LAYOUT: Readonly<Record<RuleType, TailLayout>> = {
 
 function layoutOf(type: RuleType): TailLayout {
   const l = RULE_LAYOUT[type];
-  if (!l) throw new Error(`unknown rule type ${type}`);
+  // Partial on purpose: Folks (5) and Pay (6) exist in the contract and in
+  // `RuleType`, and their fills decode — but this SDK builds no such rules yet,
+  // so it has no tail layout to template from. Saying so beats a layout guessed
+  // from a description, which is how every other wrong shape here got in.
+  if (!l) throw new Error(`no template layout for rule type ${type} — this SDK does not build that rule type yet`);
   return l;
 }
 

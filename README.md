@@ -205,6 +205,20 @@ references buy it back. Every builder here pads with empty references sized from
 the largest bundled build; if you assemble raw transactions yourself, see
 `pages.boxRefsNeeded`.
 
+## Events
+
+Fill history lives only in logs. `events.decodeEvent` turns one log line into
+`{ tag, fields, addresses?, ruleType? }`, and `events.eventsIn(txn)` walks a
+transaction's inner transactions and the registry's relay envelopes so a
+fleet-wide read still knows whose fill it was.
+
+All twenty-six tags through v1.1.2 are carried, with layouts read from the
+contract's emit sites rather than from descriptions of them — two of the nine
+v1.1.2 tags differ from how they were described (`skim` has six fields, and
+`lopen`'s escrow address sits between its two integers). `pfill` and `lfill`
+are crank fills of the Pay and Folks rule types; `ovfy` is relayed like one but
+is `verify_fill` settling a fill, and `isCrankFill` says no to it.
+
 ## Reading state, cheaply
 
 `read.boxValue` fetches ONE box by name. Reach for `read.boxes` only when the

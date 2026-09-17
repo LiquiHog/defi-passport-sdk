@@ -58,8 +58,10 @@ export * as deposit from './deposit.js';
 export * as lp from './lp.js';
 export * as note from './note.js';
 // The contract's `log(...)` lines, decoded. Fill history has to come from
-// logs — nothing on chain stores it — and the four strategy fills do NOT
-// share a layout, so a generic reader misreads three of them.
+// logs — nothing on chain stores it — and the six strategy fills do NOT share
+// a layout, so a generic reader misreads most of them. Two v1.1.2 events carry
+// a 32-byte address and one has two lengths; the layouts here were read from
+// the emit sites, and differ from the brief that described them in two places.
 export * as events from './events.js';
 export * as template from './template.js';
 // Owner-driven swaps. Trading from inside the passport with no keeper involved,

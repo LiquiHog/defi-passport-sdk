@@ -157,6 +157,10 @@ export enum RuleType {
   Balancer = 2,
   Grid = 3,
   Limit = 4,
+  /** A Folks Finance loan. Cranked from v1.1.2; no owner builder ships yet. */
+  Folks = 5,
+  /** Recurring payments to a recipient. Cranked from v1.1.2. */
+  Pay = 6,
 }
 
 /** Anti-dust floor on a balancer crank: the move must be worth target/200. */
