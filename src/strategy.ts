@@ -21,11 +21,11 @@ import {
   UNLIMITED_REFUND_BUDGET,
   type RuleType,
 } from './constants.js';
-import { abiBytes, boxName, u64, u64List } from './encode.js';
+import { abiBytes, boxName, payTail, u64, u64List } from './encode.js';
 import { flat } from './create.js';
 import { padBoxes } from './pages.js';
 import { MAX_PROGRAM_OVERFLOW } from './programs.js';
-import type { Group, Num, PassportCtx, ProfitSpec } from './types.js';
+import type { Group, Num, PassportCtx, PayRuleSpec, ProfitSpec } from './types.js';
 import { arc2 } from './note.js';
 
 const cm = (passport: bigint, asset: Num): BoxReference => ({
@@ -362,6 +362,39 @@ export function setProfit(ctx: PassportCtx, a: { sid: Num } & ProfitSpec): Trans
     [u64(a.sid), u64(PROFIT_MODE[a.mode]), u64(value), u64(PROFIT_KIND[a.kind]), u64(destSid)],
     { boxes, note: { sid: a.sid, dest: PROFIT_KIND[a.kind] } },
   );
+}
+
+/**
+ * Add a recurring payment to a `Pay` strategy. NEW IN v1.1.2.
+ *
+ * ONE ASSET. The payment leaves in `asset`, and the contract insists both
+ * prelude assets name it (`assetB == assetA`, `committedB == 0`) so the prelude
+ * commits exactly the budget and nothing else — the proven shape for ALGO is
+ * `(0, budget, 0, 0)` and for an ASA `(asa, budget, asa, 0)`. The strategy
+ * itself is opened with quote asset 0 and no quote amount.
+ *
+ * Each payment is `batch` or the remainder of the budget, whichever is smaller;
+ * the rule deletes itself at zero budget or at `maxPayments`. A recipient who
+ * has not opted in to an ASA fails LOUDLY at crank time rather than being
+ * skipped — refuse to offer such a rule if you can check.
+ */
+export function payRule(ctx: PassportCtx, s: PayRuleSpec): Transaction {
+  if (BigInt(s.budget) <= 0n) throw new RangeError('budget must be positive');
+  return addRule(ctx, {
+    sid: s.sid,
+    ruleId: s.ruleId,
+    assetA: s.asset,
+    committedA: s.budget,
+    assetB: s.asset,
+    committedB: 0,
+    tail: payTail({
+      batch: s.batch,
+      ...(s.interval !== undefined ? { interval: s.interval } : {}),
+      recipient: s.recipient,
+      ...(s.maxPayments !== undefined ? { maxPayments: s.maxPayments } : {}),
+      passport: ctx.passport,
+    }),
+  });
 }
 
 /**

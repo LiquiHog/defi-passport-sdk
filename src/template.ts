@@ -157,6 +157,29 @@ export const RULE_LAYOUT: Readonly<Partial<Record<RuleType, TailLayout>>> = {
       F('expiresTs', 48, 'deadline'),
     ],
   },
+  // A Folks operation. The pool is portable — the same op against the same pool
+  // is the same op — but every amount is denominated, and the health envelope
+  // (maxTotal, minCb) is a price assumption whose expiry is a deadline.
+  [RuleType.Folks]: {
+    type: RuleType.Folks,
+    length: 72,
+    runtime: [40, 16],
+    anchorStride: 0,
+    fields: [
+      F('op', 0, 'portable'),
+      F('pool', 8, 'portable'),
+      F('batch', 16, 'denominated'),
+      F('interval', 24, 'portable'),
+      F('maxTotal', 32, 'denominated'),
+      F('lastTs', 40, 'runtime'),
+      F('done', 48, 'runtime'),
+      F('minCb', 56, 'denominated'),
+      F('boundsExpire', 64, 'deadline'),
+    ],
+  },
+  // Pay has no entry, deliberately. Its tail carries a 32-byte recipient, which
+  // is not a u64 field, and a payment rule names a specific person — there is
+  // nothing portable in it worth templating. Read one with encode.decodePayTail.
 };
 
 function layoutOf(type: RuleType): TailLayout {
@@ -165,7 +188,12 @@ function layoutOf(type: RuleType): TailLayout {
   // `RuleType`, and their fills decode — but this SDK builds no such rules yet,
   // so it has no tail layout to template from. Saying so beats a layout guessed
   // from a description, which is how every other wrong shape here got in.
-  if (!l) throw new Error(`no template layout for rule type ${type} — this SDK does not build that rule type yet`);
+  if (!l) {
+    throw new Error(
+      `no template layout for rule type ${type} — a Pay rule names a specific recipient and has ` +
+        'nothing portable to template; read it with encode.decodePayTail',
+    );
+  }
   return l;
 }
 

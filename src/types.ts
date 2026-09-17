@@ -1,5 +1,5 @@
 import type { Algodv2, SuggestedParams, Transaction } from 'algosdk';
-import type { RuleType } from './constants.js';
+import type { FolksOp, RuleType } from './constants.js';
 
 export type Num = number | bigint;
 
@@ -173,6 +173,63 @@ export interface UpgradeCost {
   fee: number;
   /** `mbrIncrease + fee`: what must be SPENDABLE at the moment of signing. */
   spendable: number;
+}
+
+/** The `fl`+sid box: which escrow and loan app a `Folks` strategy is bound to. */
+export interface LoanBinding {
+  escrow: string;
+  loanApp: bigint;
+}
+
+/** The config half of a `Folks` rule's 72-byte tail. Runtime fields are the contract's. */
+export interface FolksTailSpec {
+  op: FolksOp;
+  /** The Folks pool app the op goes through. */
+  pool: Num;
+  /** The most one crank may move. */
+  batch: Num;
+  /** Seconds between cranks; the contract floors this at 60. */
+  interval?: Num;
+  /** Borrow only: a cumulative cap on what the rule may ever borrow. 0 means none. */
+  maxTotal?: Num;
+  /** Withdraw only: the fAsset the escrow must still hold afterwards. 0 means none. */
+  minCb?: Num;
+  /**
+   * Borrow and withdraw refuse after this unix time — MANDATORY for those two,
+   * because the health envelope (`maxTotal`, `minCb`) is the owner's own price
+   * assumption and must carry an expiry. `encode.boundsExpiry` gives the
+   * seven-day convention; re-pricing is an ordinary `updateRule`.
+   */
+  boundsExpire?: Num;
+}
+
+/** Everything `folks.folksRule` needs: the tail, plus the prelude the op takes. */
+export interface FolksRuleSpec extends FolksTailSpec {
+  sid: Num;
+  ruleId: Num;
+  /** 0 for ALGO on a deposit or withdrawal of an ALGO pool; the borrow asset on a borrow or repay. */
+  underlying: Num;
+  /** The pool's fAsset. Required for deposit and withdraw; must be absent otherwise. */
+  fAsset?: Num;
+  /** What the rule may draw. Required for deposit and repay; refused otherwise. */
+  earmark?: Num;
+}
+
+/** A `Pay` rule: a fixed amount to one recipient on an interval, until the budget is spent. */
+export interface PayRuleSpec {
+  sid: Num;
+  ruleId: Num;
+  /** The asset paid. 0 for ALGO. A recipient not opted in to an ASA fails loudly at crank time. */
+  asset: Num;
+  /** The total the rule may pay out. The last payment is the remainder. */
+  budget: Num;
+  /** Per payment. */
+  batch: Num;
+  /** Seconds between payments; floored at 60 by the contract. */
+  interval?: Num;
+  recipient: string;
+  /** Stop after this many payments. 0 means until the budget is spent. */
+  maxPayments?: Num;
 }
 
 /** What the directory publishes. Only `router` and `budget` are contract-read. */

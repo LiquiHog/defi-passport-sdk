@@ -205,6 +205,68 @@ references buy it back. Every builder here pads with empty references sized from
 the largest bundled build; if you assemble raw transactions yourself, see
 `pages.boxRefsNeeded`.
 
+## Folks lending
+
+A loan is a strategy of type `Folks`, and its rules are the operations — a
+deposit, a withdrawal, a borrow, a repayment — each cranked by the keeper, which
+does every Folks transaction itself. The SDK builds only what the owner signs.
+
+```ts
+import { folks, strategy, read, FolksOp, RuleType } from '@liquihog/defi-passport-sdk';
+
+// 1. A Folks strategy. Its quote asset is the borrow asset; that pool doubles
+//    as the repay reserve, and profit routing can point at it.
+strategy.openStrategy(ctx, { sid, type: RuleType.Folks, quoteAsset: USDC, quoteAmount: 0 });
+
+// 2. An escrow: a fresh keypair the front end generates. It signs ONE
+//    transaction, the rekey; after that the passport controls it.
+folks.fundEscrow({ from: owner, escrow, params });           // the owner signs
+folks.rekeyEscrow({ escrow, passport: passportId, params }); // the escrow key signs, once
+
+// 3. Bind the loan. Fee 3,000; refuses any loan app the contract does not accept.
+folks.openLoan(ctx, { sid, escrow, loanApp: 971388781 });
+
+// 4. Rules. The prelude each op needs is encoded once, as proven on mainnet.
+const exp = encode.boundsExpiry(Math.floor(Date.now() / 1000)); // seven days
+folks.folksRule(ctx, { sid, ruleId, op: FolksOp.Deposit, pool: ALGO_POOL, batch: 500_000,
+  underlying: 0, fAsset: FALGO, earmark: 500_000 });
+folks.folksRule(ctx, { sid, ruleId, op: FolksOp.Borrow, pool: USDC_POOL, batch: 100_000,
+  maxTotal: 300_000, boundsExpire: exp, underlying: USDC });
+
+// 5. Close. Remove the rules first; works after close_strategy too, by design.
+const bound = await read.loan(algod, passportId, sid);
+folks.folksClose(ctx, { sid, ...bound });
+```
+
+What each op puts in `add_rule`, and what the contract refuses otherwise:
+
+| op | assetA | committedA | assetB |
+|---|---|---|---|
+| deposit | the underlying (0 for ALGO) | the earmark | the fAsset |
+| withdraw | the underlying | 0 — proceeds arrive free | the fAsset |
+| borrow | the borrow asset | 0 — proceeds arrive free | 0 |
+| repay | the borrow asset | the earmark | 0 |
+
+Borrow and withdraw rules must carry a future `boundsExpire`: the health envelope
+(`maxTotal`, `minCb`) is the owner's own price assumption and has to lapse.
+Re-pricing is an ordinary `updateRule`. `read.loan` reads the binding back;
+absent means no loan is open.
+
+## Recurring payments
+
+A `Pay` strategy sends a fixed amount to one recipient on an interval until its
+budget is spent or `maxPayments` is reached. One asset, named in both prelude
+slots — the contract insists — and opened with quote asset 0.
+
+```ts
+strategy.openStrategy(ctx, { sid, type: RuleType.Pay, quoteAsset: 0, quoteAmount: 0 });
+strategy.payRule(ctx, { sid, ruleId, asset: 0, budget: 250_000, batch: 100_000, recipient });
+```
+
+An ASA payment to a recipient who has not opted in fails LOUDLY at crank time
+rather than being skipped. Pay has no template layout, on purpose: a payment
+names a specific person, and there is nothing portable in it. Read one back with
+`encode.decodePayTail`.
 ## Events
 
 Fill history lives only in logs. `events.decodeEvent` turns one log line into

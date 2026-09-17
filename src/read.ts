@@ -30,6 +30,7 @@ import { lineOf } from './version.js';
 import type {
   AppParams,
   GasAsset,
+  LoanBinding,
   Num,
   PassportState,
   Position,
@@ -265,6 +266,22 @@ export async function profit(
 ): Promise<ProfitRouting | null> {
   const raw = await boxValue(algod, passport, boxName(BOX.profit, sid));
   return raw ? decodeProfit(raw) : null;
+}
+
+/** The `fl`+sid box: 32 bytes of escrow address, then the loan app. */
+export function decodeLoan(raw: Uint8Array): LoanBinding {
+  if (raw.length !== 40) throw new Error(`loan box is ${raw.length} B, expected 40`);
+  return { escrow: encodeAddress(raw.subarray(0, 32)), loanApp: readU64(raw, 32) };
+}
+
+/**
+ * Which escrow and loan app a `Folks` strategy is bound to, or null when no loan
+ * is open. Pass both to `folks.folksClose`; the contract reads them from this
+ * same box, and the references have to match.
+ */
+export async function loan(algod: Algodv2, passport: Num, sid: Num): Promise<LoanBinding | null> {
+  const raw = await boxValue(algod, passport, boxName(BOX.loan, sid));
+  return raw ? decodeLoan(raw) : null;
 }
 
 /**

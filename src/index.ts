@@ -42,6 +42,9 @@ export * as entitlement from './entitlement.js';
 export * as directory from './directory.js';
 export * from './create.js';
 export * as strategy from './strategy.js';
+// Folks lending from the owner's side: escrow provisioning, open_loan,
+// folks_close, and the per-op rule prelude proven on mainnet.
+export * as folks from './folks.js';
 export * as manage from './manage.js';
 export * as teardown from './teardown.js';
 export * as programs from './programs.js';

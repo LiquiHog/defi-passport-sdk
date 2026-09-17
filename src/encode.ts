@@ -1,6 +1,7 @@
 /** Byte-level encoding, and the four rule tails. */
-import { decodeAddress } from 'algosdk';
-import type { AnchorSpec } from './types.js';
+import { decodeAddress, encodeAddress, getApplicationAddress } from 'algosdk';
+import type { AnchorSpec, FolksTailSpec } from './types.js';
+import { FolksOp } from './constants.js';
 
 export type Num = number | bigint;
 
@@ -179,6 +180,130 @@ export function limitTail(o: {
     u64(o.minFill ?? 0),
     u64(o.expiresTs ?? 0),
   );
+}
+
+/**
+ * A `Folks` rule's tail: 72 bytes, nine u64s.
+ *
+ *    0 op   8 pool   16 batch   24 interval   32 maxTotal
+ *   40 lastTs  48 done              <- RUNTIME, the contract's
+ *   56 minCb   64 boundsExpire
+ *
+ * Refuses what the contract refuses, with the reason: op past repay, a zero
+ * pool or batch, an interval under 60 s, and — for borrow and withdraw — a
+ * missing or past `boundsExpire`. The contract compares that one against the
+ * chain's clock; the local clock is close enough to catch a value already gone.
+ */
+export function folksTail(o: FolksTailSpec): Uint8Array {
+  if (typeof o.op !== 'number' || !(o.op in FolksOp)) throw new RangeError(`bad folks op ${o.op}`);
+  if (BigInt(o.pool) <= 0n) throw new RangeError('pool app is required');
+  if (BigInt(o.batch) <= 0n) throw new RangeError('batch must be positive');
+  const interval = BigInt(o.interval ?? 60);
+  if (interval < 60n) throw new RangeError(`interval must be at least 60 s (got ${interval})`);
+  const bounds = BigInt(o.boundsExpire ?? 0);
+  if (o.op === FolksOp.Borrow || o.op === FolksOp.Withdraw) {
+    if (bounds <= BigInt(Math.floor(Date.now() / 1000))) {
+      throw new RangeError(
+        `a ${FolksOp[o.op]} rule must carry a future boundsExpire — the health envelope is a ` +
+          'price assumption and has to lapse; see encode.boundsExpiry',
+      );
+    }
+  }
+  return concat(
+    u64(o.op),
+    u64(o.pool),
+    u64(o.batch),
+    u64(interval),
+    u64(o.maxTotal ?? 0),
+    u64(0), // runtime: last_ts
+    u64(0), // runtime: done
+    u64(o.minCb ?? 0),
+    u64(bounds),
+  );
+}
+
+/** The nine fields of a `Folks` tail, runtime included. */
+export function decodeFolksTail(tail: Uint8Array): {
+  op: FolksOp;
+  pool: bigint;
+  batch: bigint;
+  interval: bigint;
+  maxTotal: bigint;
+  lastTs: bigint;
+  done: bigint;
+  minCb: bigint;
+  boundsExpire: bigint;
+} {
+  if (tail.length !== 72) throw new Error(`folks tail is ${tail.length} B, expected 72`);
+  const op = Number(readU64(tail, 0));
+  if (!(op in FolksOp)) throw new Error(`unknown folks op ${op}`);
+  return {
+    op,
+    pool: readU64(tail, 8),
+    batch: readU64(tail, 16),
+    interval: readU64(tail, 24),
+    maxTotal: readU64(tail, 32),
+    lastTs: readU64(tail, 40),
+    done: readU64(tail, 48),
+    minCb: readU64(tail, 56),
+    boundsExpire: readU64(tail, 64),
+  };
+}
+
+/**
+ * A `Pay` rule's tail: 72 bytes, with a 32-byte address in the middle.
+ *
+ *    0 batch   8 interval   16 lastTs  24 nPaid   <- RUNTIME
+ *   32 recipient (32 B)   64 maxPayments
+ *
+ * The contract refuses the zero address and the passport itself as recipient;
+ * so does this. It does NOT check opt-in — an ASA payment to a recipient who
+ * has not opted in fails loudly at crank time, by design, rather than silently.
+ */
+export function payTail(o: {
+  batch: Num;
+  interval?: Num;
+  recipient: string;
+  maxPayments?: Num;
+  /** The passport, so a recipient equal to it is refused here as the contract would. */
+  passport?: Num;
+}): Uint8Array {
+  if (BigInt(o.batch) <= 0n) throw new RangeError('batch must be positive');
+  const interval = BigInt(o.interval ?? 60);
+  if (interval < 60n) throw new RangeError(`interval must be at least 60 s (got ${interval})`);
+  const rcpt = decodeAddress(o.recipient).publicKey;
+  if (rcpt.every((b) => b === 0)) throw new RangeError('recipient is the zero address');
+  if (o.passport !== undefined && o.recipient === getApplicationAddress(BigInt(o.passport)).toString()) {
+    throw new RangeError('recipient is the passport itself');
+  }
+  return concat(
+    u64(o.batch),
+    u64(interval),
+    u64(0), // runtime: last_ts
+    u64(0), // runtime: n_paid
+    rcpt,
+    u64(o.maxPayments ?? 0),
+  );
+}
+
+/** The six fields of a `Pay` tail, runtime included. */
+export function decodePayTail(tail: Uint8Array): {
+  batch: bigint;
+  interval: bigint;
+  lastTs: bigint;
+  nPaid: bigint;
+  recipient: string;
+  maxPayments: bigint;
+} {
+  if (tail.length !== 72) throw new Error(`pay tail is ${tail.length} B, expected 72`);
+  return {
+    batch: readU64(tail, 0),
+    interval: readU64(tail, 8),
+    lastTs: readU64(tail, 16),
+    nPaid: readU64(tail, 24),
+    recipient: encodeAddress(tail.subarray(32, 64)),
+    maxPayments: readU64(tail, 64),
+  };
 }
 
 /**

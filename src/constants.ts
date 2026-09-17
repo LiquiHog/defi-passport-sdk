@@ -248,5 +248,45 @@ export const OPTIN_FEE = 2000;
  */
 export const VERIFY_UPDATE_FEE = 1000;
 
+// ── Folks lending ───────────────────────────────────────────────────────────
+
+/** The operation a `Folks` rule performs. The contract's own numbering. */
+export enum FolksOp {
+  /** underlying -> pool.deposit -> fAsset -> escrow (add_collateral) */
+  Deposit = 0,
+  /** reduce_collateral: the underlying arrives FREE */
+  Withdraw = 1,
+  /** borrow: the underlying arrives FREE */
+  Borrow = 2,
+  /** repay, drawn from the strategy's quote pool first, then the earmark */
+  Repay = 3,
+}
+
+/**
+ * The Folks V2 loan apps the contract accepts, and no other. Mirrored from the
+ * contract's `_folks_loan_ok` so `openLoan` can refuse with the list in the
+ * message rather than on chain as "unknown loan app". Adding one is a contract
+ * patch, not an SDK edit.
+ */
+export const FOLKS_LOAN_APPS: readonly bigint[] = [
+  971388781n, // General
+  971388977n,
+  971389489n,
+  1202382736n,
+  1202382829n,
+  3184333108n,
+] as const;
+
+/** `open_loan` issues two inner transactions. */
+export const OPEN_LOAN_FEE = 3000;
+/** `folks_close` issues three. */
+export const FOLKS_CLOSE_FEE = 6000;
+
+/**
+ * What the owner funds a fresh escrow with, in uALGO. The amount the mainnet
+ * proof used; `folks_close` returns the escrow's whole balance to the passport.
+ */
+export const ESCROW_FUNDING = 950_000;
+
 /** Group-wide reference budget. Boxes, assets, apps and accounts all share it. */
 export const MAX_REFS_PER_TXN = 8;
