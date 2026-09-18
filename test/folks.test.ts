@@ -26,19 +26,9 @@ import {
 } from '../dist/constants.js';
 import { boxName, boundsExpiry, decodeFolksTail, folksTail } from '../dist/encode.js';
 import { RULE_LAYOUT, readTail } from '../dist/template.js';
-import type { PassportCtx } from '../dist/types.js';
+import { PARAMS, PASSPORT, addr, ctx, hex } from './helpers.ts';
 
-const PARAMS = {
-  fee: 1000n, minFee: 1000n, firstValid: 1n, lastValid: 1001n,
-  genesisID: 'testnet-v1.0', genesisHash: new Uint8Array(32), flatFee: true,
-};
-const addr = (n: number): string => algosdk.encodeAddress(new Uint8Array(32).fill(n));
-const PASSPORT = 555;
-const ctx: PassportCtx = {
-  algod: null as unknown as algosdk.Algodv2, registry: 1, params: PARAMS, owner: addr(9), passport: PASSPORT,
-};
 const ESCROW = addr(3);
-const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 const u64hex = (n: bigint | number): string => BigInt(n).toString(16).padStart(16, '0');
 const args = (t: algosdk.Transaction) => (t.applicationCall?.appArgs ?? []).map(hex);
 const boxesOf = (t: algosdk.Transaction) => t.applicationCall?.boxes ?? [];

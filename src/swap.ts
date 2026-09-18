@@ -29,11 +29,16 @@
  *   - `cm`+assetIn is required: the contract re-checks the committed ledger both
  *     before and after the swap.
  *   - Fees are POOLED. Every inner transaction is submitted with fee 0, so the
- *     outer call has to carry the whole group's fees or the router dies deep in
- *     its own call tree with "group fee too small".
+ *     outer call has to carry the whole call tree's fees or the router dies deep
+ *     in it with "group fee too small". That includes the ROUTER'S OWN inner
+ *     transactions, which is what the fee the quote puts on each leg is for — a
+ *     router call quoted at 7,000 pays for six more beneath it. So the head pays
+ *     1,000 per outer transaction plus each session transaction's quoted fee.
  *   - A group gets 8 references per transaction and at most 4 accounts, shared
  *     group-wide. A real multi-hop route exceeds that on its own, so the overflow
  *     rides on `ping` transactions — the same trick `closeStrategyGroup` uses.
+ *     WHICH references share a transaction matters as much as naming them — see
+ *     `layout`.
  *
  * ## What the contract will refuse
  *
@@ -90,7 +95,7 @@ export function packSession(session: readonly Transaction[]): Uint8Array {
   if (session.length > MAX_SESSION_TXNS) {
     throw new RangeError(
       `session has ${session.length} transactions, the contract accepts ` +
-        `${MAX_SESSION_TXNS} — the route is too long to replay`,
+        `${MAX_SESSION_TXNS} — the route is too long to replay; re-quote it with fewer legs`,
     );
   }
   const parts: Uint8Array[] = [];
@@ -207,73 +212,135 @@ type Slot =
   | { kind: 'asset'; v: bigint }
   | { kind: 'box'; v: BoxReference };
 
+/** A group holds at most this many transactions; the pings count. */
+export const MAX_GROUP_TXNS = 16;
+
+const slotKey = (s: Slot): string =>
+  s.kind === 'box'
+    ? `box:${s.v.appIndex}:${Array.from(s.v.name).join(',')}`
+    : `${s.kind}:${String(s.v)}`;
+
 /**
- * Spread references across as few transactions as the limits allow.
+ * The references that must land on ONE outer transaction together.
  *
- * THREE constraints, not two, and the third couples slots that look independent:
+ * NAMING A REFERENCE SOMEWHERE IN THE GROUP IS NOT ENOUGH. A holding — an
+ * account's balance of an asset — is only available when the account and the
+ * asset are named on the SAME transaction, and a local-state read needs its
+ * account beside its app. An app named anywhere makes its address an account
+ * on that transaction only. None of this shows at the call site: the router
+ * fails inside the replay with "unavailable Holding" or "unavailable Local
+ * State", naming a pool address the builder never saw as an account.
  *
- *   - 8 references of any kind, per transaction
- *   - at most 4 ACCOUNTS, per transaction
- *   - a BOX is only valid on a transaction that ALSO names the app it belongs to
+ * The quote already says which references belong together: each leg was a
+ * valid transaction on its own, with everything it reads side by side. So each
+ * leg is kept WHOLE, and with the app it calls — the router, whose own address
+ * reads its local state in every pool it trades through. That pairing is the
+ * one it is easy to lose: nothing in a leg's reference arrays names the router,
+ * because in the quote it was the called app rather than a foreign one. Split
+ * the pools from it and the router's first local read fails.
  *
- * A packer that counts only the first produces a group the node rejects on a
- * route with five pool addresses, which is an ordinary route rather than a
- * strange one. A packer that treats boxes and apps as separate items lets a box
- * land on one transaction and its app on the next, and then algosdk refuses to
- * encode the group at all — "Box ref with appId N not in foreign-apps", raised
- * from inside `assignGroupID`, which reads like a caller mistake rather than a
- * packing one. It appears only once a route needs more than one page, which is
- * the case this function exists for.
+ * Three more kinds of unit:
  *
- * So a box is placed TOGETHER with its app, and an app placed that way also
- * satisfies the group-wide requirement that every app be named somewhere. A box
- * on the passport's own app needs no companion: that app is the one being
- * called, so it is always available at index 0.
+ *   - The router beside EVERY session asset. It reads its own balance of each
+ *     hop, including assets that are neither the input nor the output.
+ *   - Each box beside its app. A box on the passport needs no companion; the
+ *     passport is the app every outer transaction calls.
+ *   - Each padding (empty) box alone, free to fill any gap.
+ *
+ * Proven on mainnet: five real routes, three of which 0.5.1's packer split —
+ * a hop asset away from the router, a pool logic-sig away from its app — all
+ * simulate clean under strict resources when laid out this way.
  */
-function spread(all: Slot[], selfApp: bigint): Slot[][] {
-  const pages: Slot[][] = [];
-  let cur: Slot[] = [];
-  let accts = 0;
-  let appsHere = new Set<bigint>();
-  const placed = new Set<bigint>();
+function units(
+  session: readonly Transaction[],
+  res: SessionResources,
+  boxes: readonly BoxReference[],
+  routerApp: bigint,
+  selfApp: bigint,
+): Slot[][] {
+  const out: Slot[][] = [];
+  const app = (v: bigint): Slot => ({ kind: 'app', v });
+  const asset = (v: bigint): Slot => ({ kind: 'asset', v });
 
-  const flush = () => {
-    if (cur.length) pages.push(cur);
-    cur = [];
-    accts = 0;
-    appsHere = new Set();
-  };
+  // The router's holdings: in chunks, each with the router, if a route ever
+  // names more assets than fit beside it on one transaction.
+  for (let i = 0; i < res.assets.length || i === 0; i += MAX_REFS_PER_TXN - 1) {
+    out.push([app(routerApp), ...res.assets.slice(i, i + MAX_REFS_PER_TXN - 1).map(asset)]);
+  }
 
-  // Boxes first, each pulling its own app onto the same page. A fresh page is
-  // empty, so the pair always fits.
-  for (const s of all) {
-    if (s.kind !== 'box') continue;
-    const app = BigInt(s.v.appIndex);
+  for (const [i, t] of session.entries()) {
+    const c = t.type === TransactionType.appl ? t.applicationCall : undefined;
+    if (!c) continue;
+    const accounts: Slot[] = (c.accounts ?? []).map((x) => ({ kind: 'account', v: x.toString() }));
+    const apps: Slot[] = (c.foreignApps ?? []).map((x) => app(BigInt(x)));
+    const assets: Slot[] = (c.foreignAssets ?? []).map((x) => asset(BigInt(x)));
+    if (!accounts.length && !apps.length && !assets.length) continue;
+    const whole = dedupe([app(BigInt(c.appIndex)), ...accounts, ...apps, ...assets]);
+    if (whole.length <= MAX_REFS_PER_TXN) {
+      out.push(whole);
+      continue;
+    }
+    // A full leg plus its router is one over. Cover the same pairs with two:
+    // router + pools + accounts for the local reads, the leg as quoted for the
+    // holdings (the router's own holdings ride on its unit above).
+    const locals = dedupe([app(BigInt(c.appIndex)), ...accounts, ...apps]);
+    if (locals.length > MAX_REFS_PER_TXN) {
+      throw new RangeError(
+        `session transaction ${i} names ${locals.length - 1} accounts and apps; with the app it ` +
+          `calls that is more than one transaction can carry together — re-quote the route`,
+      );
+    }
+    out.push(locals, dedupe([...accounts, ...apps, ...assets]));
+  }
+
+  for (const v of boxes) {
+    const owner = BigInt(v.appIndex);
+    const box: Slot = { kind: 'box', v };
     // App 0 is the called app itself, which is how an EMPTY reference is
     // written; neither it nor a box on the passport needs a companion.
-    const foreign = app !== 0n && app !== selfApp;
-    const needs = foreign && !appsHere.has(app) ? 2 : 1;
-    if (cur.length + needs > MAX_REFS_PER_TXN) flush();
-    if (foreign && !appsHere.has(app)) {
-      cur.push({ kind: 'app', v: app });
-      appsHere.add(app);
-      placed.add(app);
-    }
-    cur.push(s);
+    out.push(owner === 0n || owner === selfApp ? [box] : [app(owner), box]);
   }
+  return out;
+}
 
-  // Then everything else, skipping any app a box already brought with it.
-  for (const s of all) {
-    if (s.kind === 'box') continue;
-    if (s.kind === 'app' && placed.has(s.v)) continue;
-    const tooManyAccounts = s.kind === 'account' && accts >= MAX_ACCOUNTS_PER_TXN;
-    if (cur.length >= MAX_REFS_PER_TXN || tooManyAccounts) flush();
-    cur.push(s);
-    if (s.kind === 'account') accts++;
-    if (s.kind === 'app') appsHere.add(s.v);
+/**
+ * Merge identical references — EXCEPT empty boxes. Every empty reference is the
+ * same value and each one buys another 1,024 bytes of read budget, so merging
+ * two would silently halve what the padding exists to pay for.
+ */
+function dedupe(slots: Slot[]): Slot[] {
+  const m = new Map<string, Slot>();
+  let empty = 0;
+  for (const s of slots) {
+    const isEmpty = s.kind === 'box' && s.v.name.length === 0;
+    m.set(isEmpty ? `empty:${empty++}` : slotKey(s), s);
   }
+  return [...m.values()];
+}
 
-  flush();
+/**
+ * Place units on as few transactions as the limits allow, NEVER splitting one.
+ *
+ * Largest first, each onto the first transaction it fits with what is already
+ * there — merging identical references, since two units often share a pool or
+ * an asset. The limits: 8 references of any kind and 4 accounts per
+ * transaction. The price of keeping units whole is sometimes one more `ping`
+ * than the tightest packing, 1,000 µAlgo, against a group that cannot fail on a
+ * reference it names.
+ */
+function layout(all: Slot[][]): Slot[][] {
+  const pages: Slot[][] = [];
+  const merged = (page: Slot[], unit: Slot[]): Slot[] | null => {
+    const m = dedupe([...page, ...unit]);
+    const accounts = m.filter((s) => s.kind === 'account').length;
+    return m.length <= MAX_REFS_PER_TXN && accounts <= MAX_ACCOUNTS_PER_TXN ? m : null;
+  };
+  const order = all.map((u, i) => ({ u, i })).sort((x, y) => y.u.length - x.u.length || x.i - y.i);
+  for (const { u } of order) {
+    const at = pages.findIndex((p) => merged(p, u) !== null);
+    if (at >= 0) pages[at] = merged(pages[at]!, u)!;
+    else pages.push(merged([], u)!);
+  }
   return pages.length ? pages : [[]];
 }
 
@@ -329,19 +396,33 @@ export function swapGroup(ctx: PassportCtx, a: SwapArgs): Group {
 
   const blob = packSession(a.session);
   const res = sessionResources(ctx, a);
-  const slots: Slot[] = [
-    // Padded as a set: the group is budgeted as a whole, and the spill puts
-    // any empties wherever there is room.
-    ...padBoxes(res.boxes, MAX_PROGRAM_OVERFLOW).map((v) => ({ kind: 'box', v }) as Slot),
-    ...res.apps.map((v) => ({ kind: 'app', v }) as Slot),
-    ...res.assets.map((v) => ({ kind: 'asset', v }) as Slot),
-    ...res.accounts.map((v) => ({ kind: 'account', v }) as Slot),
-  ];
-  const pages = spread(slots, BigInt(ctx.passport));
+  const pages = layout(
+    units(
+      a.session,
+      res,
+      // Padded as a set: the group is budgeted as a whole, and the layout puts
+      // any empties wherever there is room.
+      padBoxes(res.boxes, MAX_PROGRAM_OVERFLOW),
+      BigInt(a.routerApp),
+      BigInt(ctx.passport),
+    ),
+  );
+  if (pages.length > MAX_GROUP_TXNS) {
+    throw new RangeError(
+      `this route needs ${pages.length} outer transactions to name its references, a group ` +
+        `holds ${MAX_GROUP_TXNS} — re-quote it with fewer legs`,
+    );
+  }
 
-  // The head pays for itself, for every ping, and for every inner transaction
-  // the session issues — all of which are submitted with fee 0.
-  const fee = MIN_FEE * (pages.length + a.session.length);
+  // The head pays for itself and every ping, and for everything the session
+  // does — all submitted with fee 0. A leg's quoted fee already covers the
+  // router's own inner transactions beneath it; never count one below the
+  // minimum, in case a quote leaves it unset.
+  const sessionFees = a.session.reduce(
+    (n, t) => n + Math.max(Number(t.fee), MIN_FEE),
+    0,
+  );
+  const fee = MIN_FEE * pages.length + sessionFees;
 
   const head = {
     appArgs: [

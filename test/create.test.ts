@@ -39,20 +39,11 @@ import {
   VERIFY_UPDATE_FEE,
 } from '../dist/constants.js';
 import { addrBox, boxName } from '../dist/encode.js';
+import { PARAMS, PASSPORT, addr, hex } from './helpers.ts';
 
-const PARAMS = {
-  fee: 1000n,
-  minFee: 1000n,
-  firstValid: 1n,
-  lastValid: 1001n,
-  genesisID: 'testnet-v1.0',
-  genesisHash: new Uint8Array(32),
-  flatFee: true,
-};
-
-const OWNER = algosdk.encodeAddress(new Uint8Array(32).fill(7));
+// Not the shared owner: this address's bytes are asserted inside box names below.
+const OWNER = addr(7);
 const REGISTRY = 3672932347;
-const PASSPORT = 555;
 const VERSION = 1_001_001n; // v1.1.1
 
 /**
@@ -66,8 +57,6 @@ const LINE = 4242;
 const APPROVAL = new Uint8Array([0x0b, 0x81, 0x01]);
 const CLEAR = new Uint8Array([0x0b, 0x81, 0x01, 0x43]);
 
-const hex = (b: Uint8Array): string =>
-  Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
 
 /** Box references as a comparable set — the AVM does not care about order. */
 const boxSet = (t: algosdk.Transaction): string[] =>

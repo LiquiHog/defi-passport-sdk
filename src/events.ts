@@ -147,13 +147,17 @@ const alternatives = (v: EventLayout | readonly EventLayout[]): readonly EventLa
 /**
  * One log line to a decoded event, or null when it is not one of ours.
  *
+ * Null or undefined in, null out: an indexer page with a missing log entry
+ * should cost one line of a feed, not the feed.
+ *
  * Returns null rather than throwing: an app's logs also carry ARC-4 return values
  * and anything a future version adds, so "not recognised" is the common case and
  * not an error. It does NOT tolerate a recognised tag with the wrong length — that
  * means this SDK and the contract disagree, which is worth surfacing as a skip
  * rather than as plausible numbers.
  */
-export function decodeEvent(bytes: Uint8Array): DecodedEvent | null {
+export function decodeEvent(bytes: Uint8Array | null | undefined): DecodedEvent | null {
+  if (!(bytes instanceof Uint8Array)) return null;
   const tag = TAGS.find(
     (t) => bytes.length > t.length && TXT.decode(bytes.subarray(0, t.length)) === t,
   );
@@ -190,12 +194,12 @@ export function decodeEvent(bytes: Uint8Array): DecodedEvent | null {
  *
  * The registry logs this for every crank event any registered passport relays, so
  * it is the one place to read the whole fleet's history. Returns null for a log
- * that is not an envelope.
+ * that is not an envelope, and for null or undefined.
  */
 export function unwrapRelay(
-  bytes: Uint8Array,
+  bytes: Uint8Array | null | undefined,
 ): { passport: bigint; payload: Uint8Array } | null {
-  if (bytes.length <= 10 || TXT.decode(bytes.subarray(0, 2)) !== 'ev') return null;
+  if (!(bytes instanceof Uint8Array) || bytes.length <= 10 || TXT.decode(bytes.subarray(0, 2)) !== 'ev') return null;
   return { passport: readU64(bytes, 2), payload: bytes.subarray(10) };
 }
 
@@ -207,10 +211,23 @@ export function unwrapRelay(
  * a SEND (`spend`, `refund`, and the recipient in `addresses`) and `lfill` is a
  * loan operation (`op`, `used`, `refund`); neither has an output amount, and
  * `fields.outDelta` on them is undefined. A renderer that assumes "fill means
- * swap" shows a payment as a trade of nothing. Render by tag or by `ruleType`,
- * not by this predicate alone.
+ * swap" shows a payment as a trade of nothing. To find trades, use
+ * `isSwapFill`; for trades a keeper made, `isCrankFill(t) && isSwapFill(t)`.
  */
 export const isCrankFill = (tag: string): boolean => tag in FILL_RULE_TYPE;
+
+const SWAP_FILLS: ReadonlySet<string> = new Set(['sfill', 'ofill', 'gfill', 'bfill', 'xfill']);
+
+/**
+ * True for every event that records a TRADE: `sfill`, `ofill`, `gfill` and
+ * `xfill` carry `outDelta`, `bfill` carries `outResult`.
+ *
+ * Includes `xfill`, the owner's own swap, because a trade is a trade whoever
+ * signed it — keeper-only is `isCrankFill(t) && isSwapFill(t)`, so it needs no
+ * name of its own. Excludes `pfill` (a send) and `lfill` (a loan operation):
+ * crank fills, but nothing was traded and there is no output amount to show.
+ */
+export const isSwapFill = (tag: string): boolean => SWAP_FILLS.has(tag);
 
 /**
  * Every event in a transaction, including inner transactions and relays.

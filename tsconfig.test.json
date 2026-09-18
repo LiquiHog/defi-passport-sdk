@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "rootDir": "."
   },
@@ -13,7 +14,11 @@
     "",
     "Tests import from dist/ rather than src/, so this needs a build first — which",
     "is why `typecheck` and `test` both run `tsc` before it. Checking them against",
-    "the emitted .d.ts is the point: it is the surface consumers actually get."
+    "the emitted .d.ts is the point: it is the surface consumers actually get.",
+    "",
+    "allowImportingTsExtensions lets a test import test/helpers.ts by its real name,",
+    "which is what node's type stripping needs at run time. It is legal only because",
+    "this config emits nothing."
   ],
   "include": ["test/**/*.ts"]
 }

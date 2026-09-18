@@ -1,0 +1,72 @@
+{
+  "name": "algo-usdc-5",
+  "routerApp": "3586571385",
+  "assetIn": "0",
+  "assetOut": "31566704",
+  "asBuilt": {
+    "sdk": "0.5.1",
+    "strict": "clean",
+    "missing": {
+      "holdings": [],
+      "locals": []
+    }
+  },
+  "session": [
+    {
+      "type": "pay",
+      "fee": 1000,
+      "receiver": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q"
+    },
+    {
+      "type": "appl",
+      "fee": 1000,
+      "app": "3586571385",
+      "accounts": [],
+      "apps": [],
+      "assets": [],
+      "boxes": [
+        {
+          "app": "0",
+          "name": "c2I="
+        }
+      ]
+    },
+    {
+      "type": "appl",
+      "fee": 10000,
+      "app": "3586571385",
+      "accounts": [
+        "7UWFIDUGJ6JVQ3DA7PJRFDB45RNQ55FKVLTXMIHCOFCNWUGRGXOMODVRQI",
+        "JWOUUZ7YJJ42EHPRGW2NG64LZNUHNMWK7D5TE36GF6P6P2FXHGPZ42V2AE"
+      ],
+      "apps": [
+        "1073557308",
+        "2966799501",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "0",
+        "31566704"
+      ],
+      "boxes": []
+    },
+    {
+      "type": "appl",
+      "fee": 2000,
+      "app": "3586571385",
+      "accounts": [],
+      "apps": [],
+      "assets": [
+        "31566704",
+        "3178895177"
+      ],
+      "boxes": [
+        {
+          "app": "0",
+          "name": "c2I="
+        }
+      ]
+    }
+  ]
+}

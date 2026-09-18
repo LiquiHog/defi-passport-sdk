@@ -10,7 +10,8 @@ bundle with zero externals.
 
 ```bash
 npm install && npm run build
-npm test          # the entitlement and gas-cap rules — no chain, no accounts
+npm test          # offline: no chain, no accounts, no config
+npm run check     # your own passport and routes, simulate-only — see Testing
 ```
 
 ## Pure builders
@@ -86,11 +87,29 @@ transactions, and the references those legs need are lifted back out onto the
 outer group — including the two that read as contract faults and are not: asset
 0, which is illegal on an inner transaction but must be named at top level, and
 box references, which are dropped on replay. Overflow rides on `ping`, and the
-fee is pooled for the whole call tree.
+fee is pooled for the whole call tree: the head pays 1,000 per outer transaction
+plus each session transaction's QUOTED fee, because a router call quoted at 7,000
+pays for the router's own inner transactions beneath it.
+
+Which references share a transaction matters as much as naming them. A holding
+needs its account and asset on the same transaction, and a local read its
+account beside its app, so each leg of the quote is kept whole, beside the router
+it calls. A route that spills costs a `ping` or two, never a failed swap.
+
+A passport replays at most **8** session transactions (`swap.MAX_SESSION_TXNS`);
+the contract refuses more as `session too long`, and `swapGroup` refuses first.
+An unconstrained route for a large amount can come back longer than that — ask
+the router for fewer legs (`max_legs`) and take the best quote that fits. A
+route whose references need more than 16 outer transactions is refused the same
+way.
 
 Take `routerApp` from `read.passportState`. The passport allowlists a session's
 apps against its OWN cached ids, so a blob built for a router it has not adopted
 fails with `app not allowlisted`.
+
+To check a real route from your own passport before signing anything, save the
+router session to a file and list it under `swaps` in your config — `npm run
+check` builds it with `swapGroup` and strict-simulates it (see Testing).
 
 ## Capping what automation may spend
 
@@ -281,7 +300,9 @@ v1.1.2 tags differ from how they were described (`skim` has six fields, and
 are crank fills of the Pay and Folks rule types; `ovfy` is relayed like one but
 is `verify_fill` settling a fill, and `isCrankFill` says no to it. A crank fill
 is not always a swap: `pfill` is a send and `lfill` a loan operation, and neither
-carries `outDelta` — render by tag, not by the predicate alone.
+carries `outDelta` — render by tag, not by the predicate alone. To find trades,
+use `isSwapFill` (`sfill`, `ofill`, `gfill`, `bfill` and the owner's own
+`xfill`); keeper-made trades are `isCrankFill(t) && isSwapFill(t)`.
 
 To know which rule types a passport can open, resolve its build from its own
 version — `programs.buildForVersion(algod, registry, state.version).ruleTypes` —
@@ -322,27 +343,59 @@ const live = await directory.resolve(algod, DIRECTORY_APP_ID);
 Entries that are not published yet come back as `0` — or the zero address — rather
 than throwing, so check the one you need before relying on it.
 
-## What the tests cover
+## Testing
 
-The entitlement rule, the gas-cap resolution and the bundled program builds are
-unit-tested against synthetic registry and passport state — both sides of the
-version-line split, no chain and no funded account.
+Two tiers, and neither ever signs anything.
 
-That split matters because the failure these guard against is invisible on a
-healthy registry. The obvious live check — resolve one address per tier and
-confirm it names the version that passport is already running — cannot tell
-`line // 1000 >= min_major` from `line >= min_major`, because both answer
-identically for every line a working registry actually has. The rule only shows
-its granularity against a RETIRED line, which a healthy registry has none of, so
-the boundary is constructed in the suite instead.
+### `npm test` — offline
 
-The build suite guards a different silence. Four programs are bundled — two tiers
-across two eras — because an approved version can never be un-approved, so v1.0.0
-and v1.1.0 stay installable alongside v1.0.1 and v1.1.1. Twenty-three pcs agree
-within each era and disagree across it, and `simulate.explain` answers only where
-every map that has a pc agrees. Drop the older pair to save bundle size and those
-pcs start answering confidently and wrongly for every passport that has not
-upgraded yet — so a test asserts they stay ambiguous.
+No chain, no accounts, no config. Every builder is tested against placeholder
+ids from `test/helpers.ts` — a passport, an owner and suggested params that are
+well-formed but not real — so a test you add reads the same way and cannot reach
+a node by accident. Any `test/**/*.test.ts` file is picked up automatically.
+
+Swap layout is also tested against **real routes**: every file in
+`test/fixtures/routes/` is a mainnet router session, made anonymous, replayed
+through `swapGroup` and checked for a reference split from the one it has to sit
+beside. To add one, capture it with `npm run check -- --save` and convert it with
+`node scripts/route-fixture.mjs captures/<file>.json`. The converter refuses to
+write anything that still names the passport, its owner or the quote. The
+fixture folder's README has the schema.
+
+Two of the offline suites guard failures a live check cannot see:
+
+- **The entitlement rule** is tested on both sides of the version-line split. A
+  live check can't tell `line // 1000 >= min_major` from `line >= min_major`:
+  both give the same answer for every line a healthy registry has. The rule only
+  shows its granularity against a RETIRED line, so the suite constructs one.
+- **The bundled builds.** Five programs are bundled, across two tiers and three
+  eras, because an approved version can never be un-approved. Twenty-three pcs
+  agree within an era and disagree across eras, and `simulate.explain` only
+  answers where every map that has a pc agrees. Drop an older build and those
+  pcs start answering confidently and wrongly for every passport that hasn't
+  upgraded, so a test asserts they stay ambiguous.
+
+### `npm run check` — your own passport, simulate-only
+
+Copy `sdk-test.config.example.json` to `sdk-test.config.json` (git-ignored) and
+fill in what you want checked. Every section is optional:
+
+| set | checked |
+|---|---|
+| `registry` | its live state: globals, pinned program, each cohort's version, bundled bytes for every version it serves |
+| `registry` + `owner` | what that address is entitled to, and whether this SDK carries the bytes |
+| `passport` | its state, and its upgrade built as a front end would and simulated |
+| `passport` + `swaps` | each saved router session built by `swapGroup` and strict-simulated |
+
+A config holding anything that looks like a key or mnemonic is refused. A swap
+that stops on a stale price or on too little free balance is reported, not
+failed, because neither says anything about the group this SDK built. Fetching
+a fresh quote from the router isn't supported yet (`quote.url` is reserved), so
+save the session your front end already received.
+
+`npm run live-check` is the same registry check run against several registries at
+once: the ones you pass as arguments, or `maintainer.registries` from the config,
+or the production registry by default.
 
 ## Scope
 

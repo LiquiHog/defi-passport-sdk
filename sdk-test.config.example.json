@@ -1,0 +1,33 @@
+{
+  "//": [
+    "Copy this file to sdk-test.config.json (git-ignored) and fill in what you want",
+    "checked by `npm run check`. Every section is optional; leave a value at 0 or \"\"",
+    "to skip it. Nothing is ever signed: do NOT put a key or mnemonic here — a config",
+    "with one is refused.",
+    "",
+    "registry: a registry app id. With owner, also checks that address's entitlement.",
+    "passport: your passport app id. Checks its state and simulates its upgrade.",
+    "swaps: routes to build and strict-simulate from your passport. `session` is a",
+    "  saved router session (a JSON array of base64 msgpack transactions), relative",
+    "  to this file. `npm run check -- --save` writes captures/ for route fixtures.",
+    "quote.url: reserved for fetching fresh quotes; not supported yet.",
+    "maintainer.registries: what `npm run live-check` runs against when given no ids",
+    "  ({ id, expect: line|major, label?, note? }). Defaults to the production registry."
+  ],
+  "algodUrl": "https://mainnet-api.algonode.cloud",
+  "registry": 0,
+  "owner": "",
+  "passport": 0,
+  "swaps": [
+    {
+      "name": "example-route",
+      "assetIn": 0,
+      "assetOut": 0,
+      "spend": 0,
+      "minOut": 1,
+      "session": ""
+    }
+  ],
+  "quote": { "url": "" },
+  "maintainer": { "registries": [] }
+}

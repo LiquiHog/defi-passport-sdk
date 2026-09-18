@@ -1,5 +1,8 @@
 node_modules/
 logs/
+# The live check's own inputs and outputs: a user's passport, owner and routes.
+sdk-test.config.json
+captures/
 dist/
 *.log
 .env
@@ -8,3 +11,8 @@ dist/
 *.pem
 *mnemonic*
 *secret*
+# AI assistant settings, notes and memory: local to each developer, never published.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+MEMORY.md

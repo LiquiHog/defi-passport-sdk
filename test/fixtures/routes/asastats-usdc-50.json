@@ -1,0 +1,73 @@
+{
+  "name": "asastats-usdc-50",
+  "routerApp": "3586571385",
+  "assetIn": "393537671",
+  "assetOut": "31566704",
+  "asBuilt": {
+    "sdk": "0.5.1",
+    "strict": "clean",
+    "missing": {
+      "holdings": [],
+      "locals": []
+    }
+  },
+  "session": [
+    {
+      "type": "axfer",
+      "fee": 1000,
+      "receiver": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q",
+      "asset": "393537671"
+    },
+    {
+      "type": "appl",
+      "fee": 1000,
+      "app": "3586571385",
+      "accounts": [],
+      "apps": [],
+      "assets": [],
+      "boxes": [
+        {
+          "app": "0",
+          "name": "c2I="
+        }
+      ]
+    },
+    {
+      "type": "appl",
+      "fee": 6000,
+      "app": "3586571385",
+      "accounts": [
+        "Q7ZVCA7RGOFGDFR466I3XTBU7TKE3QR6P2KISC2EE7CVBIGF5RC6NPOPS4"
+      ],
+      "apps": [
+        "3079067198",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "393537671",
+        "445102875"
+      ],
+      "boxes": []
+    },
+    {
+      "type": "appl",
+      "fee": 7000,
+      "app": "3586571385",
+      "accounts": [
+        "OHGXUITUFWXHNZFHHXJ2BI7JWC6VPFFVU6X6DDHNY4HNKDR26SR7XEDU7Y"
+      ],
+      "apps": [
+        "2577995477",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "31566704",
+        "445102875",
+        "3178895177"
+      ],
+      "boxes": []
+    }
+  ]
+}

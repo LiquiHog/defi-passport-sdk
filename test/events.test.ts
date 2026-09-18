@@ -19,6 +19,7 @@ import {
   decodeEvent,
   eventsIn,
   isCrankFill,
+  isSwapFill,
   unwrapRelay,
 } from '../dist/events.js';
 import { RuleType } from '../dist/constants.js';
@@ -147,6 +148,23 @@ test('the six crank fills carry a rule type; nothing else does', () => {
   for (const tag of ['xfill', 'ovfy', 'skim', 'sprofit', 'sput']) assert.equal(isCrankFill(tag), false, tag);
   assert.equal(FILL_RULE_TYPE['pfill'], RuleType.Pay);
   assert.equal(FILL_RULE_TYPE['lfill'], RuleType.Folks);
+});
+
+test('isSwapFill: the five tags that record a trade, xfill included', () => {
+  for (const tag of ['sfill', 'ofill', 'gfill', 'bfill', 'xfill']) assert.equal(isSwapFill(tag), true, tag);
+  // Crank fills that trade nothing, and everything that is not a fill.
+  for (const tag of ['pfill', 'lfill', 'ovfy', 'skim', 'sprofit', 'lock']) assert.equal(isSwapFill(tag), false, tag);
+  // Keeper-made trades need no name of their own.
+  const keeperSwaps = Object.keys(EVENT_LAYOUT).filter((t) => isCrankFill(t) && isSwapFill(t)).sort();
+  assert.deepEqual(keeperSwaps, ['bfill', 'gfill', 'ofill', 'sfill']);
+});
+
+test('decodeEvent and unwrapRelay return null for a missing log, as documented', () => {
+  // An indexer page with a hole in it must cost one line of a feed, not the feed.
+  assert.equal(decodeEvent(null), null);
+  assert.equal(decodeEvent(undefined), null);
+  assert.equal(unwrapRelay(null), null);
+  assert.equal(unwrapRelay(undefined), null);
 });
 
 test('RuleType now names what the contract has always numbered', () => {

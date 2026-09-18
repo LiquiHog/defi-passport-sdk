@@ -21,42 +21,24 @@ import { test } from 'node:test';
 import algosdk from 'algosdk';
 import { swap } from '../dist/index.js';
 import { MAX_REFS_PER_TXN } from '../dist/constants.js';
-import type { PassportCtx } from '../dist/types.js';
 import type { SwapArgs } from '../dist/swap.js';
+import { PARAMS, PASSPORT, addr, ctx } from './helpers.ts';
 
-const PARAMS = {
-  fee: 1000n,
-  minFee: 1000n,
-  firstValid: 1n,
-  lastValid: 1001n,
-  genesisID: 'testnet-v1.0',
-  genesisHash: new Uint8Array(32),
-  flatFee: true,
-};
-
-const addr = (n: number): string => algosdk.encodeAddress(new Uint8Array(32).fill(n));
-
-const PASSPORT = 555;
 const ROUTER = 999;
 
-// These builders never call algod — they are pure, and that is the point of the
-// SDK. Casting once here, rather than at each call site, keeps every other line
-// in this file checked against the real signature.
-const ctx = (): PassportCtx => ({
-  algod: null as unknown as algosdk.Algodv2,
-  registry: 1,
-  params: PARAMS,
-  owner: addr(9),
-  passport: PASSPORT,
-});
-
-/** An app call leg that reads `boxes` of its own app and touches `assets`. */
-const leg = (app: number, o: { boxes?: number; assets?: number[]; accounts?: number[] } = {}) =>
+/**
+ * A session leg calling `app`: reads `boxes` of its own app, touches `assets`,
+ * names `accounts` and pool `apps`, and is quoted at `fee`.
+ */
+const leg = (
+  app: number,
+  o: { boxes?: number; assets?: number[]; accounts?: number[]; apps?: number[]; fee?: bigint } = {},
+) =>
   algosdk.makeApplicationNoOpTxnFromObject({
     sender: addr(1),
     appIndex: BigInt(app),
     appArgs: [new Uint8Array([1])],
-    suggestedParams: PARAMS,
+    suggestedParams: o.fee === undefined ? PARAMS : { ...PARAMS, fee: o.fee },
     ...(o.boxes
       ? {
           boxes: Array.from({ length: o.boxes }, (_, i) => ({
@@ -67,10 +49,11 @@ const leg = (app: number, o: { boxes?: number; assets?: number[]; accounts?: num
       : {}),
     ...(o.assets ? { foreignAssets: o.assets } : {}),
     ...(o.accounts ? { accounts: o.accounts.map(addr) } : {}),
+    ...(o.apps ? { foreignApps: o.apps } : {}),
   });
 
 const build = (session: algosdk.Transaction[], over: Partial<SwapArgs> = {}) =>
-  swap.swapGroup(ctx(), {
+  swap.swapGroup(ctx, {
     assetIn: 0,
     spend: 1_000_000n,
     assetOut: 10,
@@ -168,7 +151,7 @@ test('asset 0 is named at top level and stripped from the replayed blob', () => 
   const without = swap.packSession([leg(1001, { assets: [10] })]);
   assert.deepEqual(withAlgo, without, 'asset 0 must not survive into the blob');
 
-  const res = swap.sessionResources(ctx(), {
+  const res = swap.sessionResources(ctx, {
     session,
     assetIn: 0,
     assetOut: 10,
@@ -177,12 +160,69 @@ test('asset 0 is named at top level and stripped from the replayed blob', () => 
   assert.ok(res.assets.includes(0n), 'resources lift asset 0 back out to the group');
 });
 
-test('the fee covers every outer transaction and every inner one', () => {
-  const session = [1001, 1002, 1003].map((app) => leg(app, { boxes: 3 }));
+test('the head pays 1,000 per outer transaction plus each leg\'s QUOTED fee', () => {
+  // A router call quoted at 7,000 issues six more of its own; the passport
+  // replays it at fee 0, so the head carries what the quote said. A leg quoted
+  // at 0 still costs the minimum. Legs all at 1,000 could not tell this formula
+  // from "1,000 per transaction", which is how 0.5.1 under-charged real routes.
+  const session = [
+    leg(1001, { boxes: 3 }),
+    leg(1002, { boxes: 3, fee: 7000n }),
+    leg(1003, { boxes: 3, fee: 0n }),
+  ];
   const g = build(session);
-  const total = g.reduce((n, t) => n + Number(t.fee), 0);
-  assert.equal(total, 1000 * (g.length + session.length));
+  assert.equal(Number(g[0]!.fee), 1000 * g.length + 1000 + 7000 + 1000);
   for (const t of g.slice(1)) assert.equal(Number(t.fee), 0, 'pings ride on the head fee');
+});
+
+test('a leg stays whole, beside the router it calls, however the route spills', () => {
+  // A holding needs its account and asset on the SAME outer transaction, and a
+  // local read its account beside its app. The router reads its own local state
+  // in every pool of a leg, yet nothing in the leg's arrays names the router —
+  // it was the CALLED app. So each leg's accounts, pools and assets must share
+  // a transaction with it.
+  const legs = [
+    { accounts: [2, 3], apps: [1001, 1002, 1003], assets: [20, 21] },
+    { accounts: [4], apps: [1004, 1005], assets: [21, 22] },
+  ];
+  const g = build([leg(ROUTER, { boxes: 3 }), ...legs.map((l) => leg(ROUTER, l))]);
+  assert.ok(g.length > 1, 'this route must spill');
+  assertWellFormed(g);
+  for (const l of legs) {
+    const home = g.find((t) => {
+      const c = t.applicationCall!;
+      const apps = (c.foreignApps ?? []).map(Number);
+      const assets = (c.foreignAssets ?? []).map(Number);
+      const accounts = (c.accounts ?? []).map(String);
+      return apps.includes(ROUTER) &&
+        l.apps.every((p) => apps.includes(p)) &&
+        l.assets.every((a) => assets.includes(a)) &&
+        l.accounts.every((n) => accounts.includes(addr(n)));
+    });
+    assert.ok(home, `the leg with pools ${l.apps.join(',')} must sit whole beside the router`);
+  }
+});
+
+test('the router sits beside every asset the session names', () => {
+  // It reads its own balance of each hop, not only the input and output.
+  const g = build([leg(ROUTER, { assets: [20, 21] }), leg(ROUTER, { assets: [22, 23] })]);
+  const home = g.find((t) => {
+    const c = t.applicationCall!;
+    const assets = (c.foreignAssets ?? []).map(Number);
+    return (c.foreignApps ?? []).map(Number).includes(ROUTER) &&
+      [0, 10, 20, 21, 22, 23].every((a) => assets.includes(a));
+  });
+  assert.ok(home, 'one outer transaction must carry the router and every session asset');
+});
+
+test('a route that needs more than a group holds is refused, not built', () => {
+  // Eight full legs sharing nothing: each needs two transactions once its
+  // router is added, and a group holds sixteen.
+  let n = 10;
+  const session = Array.from({ length: 8 }, () =>
+    leg(ROUTER, { accounts: [n++, n++, n++, n++], assets: [n++], apps: [n++, n++, n++] }),
+  );
+  assert.throws(() => build(session), /a group holds 16 — re-quote it with fewer legs/);
 });
 
 test('inputs the contract would refuse are refused here', () => {

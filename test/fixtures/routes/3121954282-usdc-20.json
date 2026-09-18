@@ -1,0 +1,120 @@
+{
+  "name": "3121954282-usdc-20",
+  "routerApp": "3586571385",
+  "assetIn": "3121954282",
+  "assetOut": "31566704",
+  "asBuilt": {
+    "sdk": "0.5.1",
+    "strict": "fail",
+    "missing": {
+      "holdings": [
+        {
+          "account": "XSKED5VKZZCSYNDWXZJI65JM2HP7HZFJWCOBIMOONKHTK5UVKENBNVDEYM",
+          "asset": "3121954282"
+        },
+        {
+          "account": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q",
+          "asset": "452399768"
+        },
+        {
+          "account": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q",
+          "asset": "31566704"
+        },
+        {
+          "account": "WVSV2HZO5KZ6RBFMN2N6XQOQZUFBFA7DGQJJZ5WSUQBIZYDCG4JALLUG5Y",
+          "asset": "452399768"
+        },
+        {
+          "account": "WVSV2HZO5KZ6RBFMN2N6XQOQZUFBFA7DGQJJZ5WSUQBIZYDCG4JALLUG5Y",
+          "asset": "31566704"
+        },
+        {
+          "account": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q",
+          "asset": "3121954282"
+        }
+      ],
+      "locals": [
+        {
+          "account": "5T5VBTBOPW2ZRJX6QJYCBMZ24VAW7IWFGV7GHCBKFNKIN2XYHP5OLOSQJQ",
+          "app": "1002541853"
+        }
+      ]
+    }
+  },
+  "session": [
+    {
+      "type": "axfer",
+      "fee": 1000,
+      "receiver": "OSOM2MQLJMLWY2DK7BRX74HWP4NB353OA7IDYEBMNFD5ANAYLQMJLJB32Q",
+      "asset": "3121954282"
+    },
+    {
+      "type": "appl",
+      "fee": 1000,
+      "app": "3586571385",
+      "accounts": [],
+      "apps": [],
+      "assets": [],
+      "boxes": [
+        {
+          "app": "0",
+          "name": "c2I="
+        }
+      ]
+    },
+    {
+      "type": "appl",
+      "fee": 7000,
+      "app": "3586571385",
+      "accounts": [
+        "5T5VBTBOPW2ZRJX6QJYCBMZ24VAW7IWFGV7GHCBKFNKIN2XYHP5OLOSQJQ"
+      ],
+      "apps": [
+        "1002541853",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "3121954282"
+      ],
+      "boxes": []
+    },
+    {
+      "type": "appl",
+      "fee": 6000,
+      "app": "3586571385",
+      "accounts": [
+        "DQYGJXDLHD6JQV4ETZVS53XCFQY7SQWBNHE5ORANJFZDVQVMNV7LFFKVFQ"
+      ],
+      "apps": [
+        "2757544466",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "0",
+        "452399768"
+      ],
+      "boxes": []
+    },
+    {
+      "type": "appl",
+      "fee": 7000,
+      "app": "3586571385",
+      "accounts": [
+        "WVSV2HZO5KZ6RBFMN2N6XQOQZUFBFA7DGQJJZ5WSUQBIZYDCG4JALLUG5Y"
+      ],
+      "apps": [
+        "1075409914",
+        "3544641019",
+        "3544641082"
+      ],
+      "assets": [
+        "31566704",
+        "452399768",
+        "3178895177"
+      ],
+      "boxes": []
+    }
+  ]
+}

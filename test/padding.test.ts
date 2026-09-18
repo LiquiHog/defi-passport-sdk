@@ -21,26 +21,7 @@ import { BOX, MAX_REFS_PER_TXN, RuleType } from '../dist/constants.js';
 import { boxName } from '../dist/encode.js';
 import { boxRefsNeeded } from '../dist/pages.js';
 import { MAX_PROGRAM_OVERFLOW } from '../dist/programs.js';
-import type { PassportCtx } from '../dist/types.js';
-
-const PARAMS = {
-  fee: 1000n,
-  minFee: 1000n,
-  firstValid: 1n,
-  lastValid: 1001n,
-  genesisID: 'testnet-v1.0',
-  genesisHash: new Uint8Array(32),
-  flatFee: true,
-};
-const addr = (n: number): string => algosdk.encodeAddress(new Uint8Array(32).fill(n));
-const PASSPORT = 555;
-const ctx: PassportCtx = {
-  algod: null as unknown as algosdk.Algodv2,
-  registry: 1,
-  params: PARAMS,
-  owner: addr(9),
-  passport: PASSPORT,
-};
+import { PARAMS, PASSPORT, addr, ctx } from './helpers.ts';
 
 const boxesOf = (t: algosdk.Transaction) => t.applicationCall?.boxes ?? [];
 const isEmpty = (b: { name: Uint8Array }) => b.name.length === 0;
