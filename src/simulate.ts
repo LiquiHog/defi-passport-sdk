@@ -12,6 +12,7 @@ import {
   type Algodv2,
   type Transaction,
 } from 'algosdk';
+import { READ_BUDGET_PER_BOX_REF } from './constants.js';
 import { ALL_BUILDS, type Build } from './programs.js';
 
 export interface SimResult {
@@ -28,6 +29,29 @@ export interface SimResult {
   budgets: number[];
   /** Resources the group touched but did not name. Empty when fully populated. */
   unnamed?: unknown;
+  /**
+   * Set when the group was refused for READ BUDGET: what it drew, what its
+   * references bought, and how many more references would cover the gap.
+   */
+  readBudget?: { draw: number; have: number; refsShort: number };
+}
+
+/**
+ * The node's own arithmetic out of "read budget exceeded (draw > have)".
+ *
+ * Both numbers come back, so a caller that hits this does not have to model the
+ * rule: add `refsShort` empty references and rebuild. That is the durable fix
+ * for an app that grows — a router upgraded in place, say — because it reads the
+ * size off the failure instead of predicting it.
+ */
+export function readBudget(
+  failure: string,
+): { draw: number; have: number; refsShort: number } | undefined {
+  const m = /read budget exceeded \((\d+) > (\d+)\)/.exec(failure);
+  if (!m) return undefined;
+  const draw = Number(m[1]);
+  const have = Number(m[2]);
+  return { draw, have, refsShort: Math.ceil((draw - have) / READ_BUDGET_PER_BOX_REF) };
 }
 
 /**
@@ -129,10 +153,12 @@ export async function simulate(
   const failure = g?.failureMessage ?? '';
   const budgets = (g?.txnResults ?? []).map((r) => Number(r.appBudgetConsumed ?? 0));
   const unnamed = g?.unnamedResourcesAccessed;
+  const budget = readBudget(failure);
   return {
     ok: !failure,
     failure,
     ...explain(failure, opts),
+    ...(budget ? { readBudget: budget } : {}),
     budgets,
     ...(unnamed ? { unnamed } : {}),
   };

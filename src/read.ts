@@ -18,7 +18,7 @@ import {
   RuleType,
   VERIFY_UPDATE_FEE,
 } from './constants.js';
-import { extraPagesFor, programBytes, programFee } from './pages.js';
+import { extraPagesFor, programBytes, programFee, programOverflow } from './pages.js';
 import { addrBox, boxName, readU64 } from './encode.js';
 import {
   resolveLine,
@@ -201,6 +201,30 @@ export async function appParams(algod: Algodv2, app: Num): Promise<AppParams> {
       localBytes: Number(p?.localStateSchema?.numByteSlice ?? 0),
     },
   };
+}
+
+/**
+ * How much READ BUDGET naming this app costs a group, in bytes.
+ *
+ * Its program's size over the legacy 8,192-byte cap — approval plus clear, the
+ * way the node counts it. Every group that NAMES the app pays this, whether or
+ * not it calls it, and one box reference buys `READ_BUDGET_PER_BOX_REF` of it.
+ *
+ * WHY THIS IS A READ AND NOT A CONSTANT. Builders pad for the passport's own
+ * program, whose size this SDK knows because it bundles the bytes. A router is
+ * a different matter: it is upgraded in place by someone else, so its draw is a
+ * fact about today's chain. Fetch it once, cache it, and pass it to
+ * `swapGroup` as `extraDraw` — a hard-coded figure is wrong the day the router
+ * grows, and the failure it produces ("read budget exceeded") names nothing
+ * about the route.
+ *
+ * Zero for any app under the cap, which is most of them.
+ */
+export async function programDraw(algod: Algodv2, app: Num): Promise<number> {
+  const info = await algod.getApplicationByID(BigInt(app)).do();
+  const p = info.params;
+  const bytes = (p?.approvalProgram?.length ?? 0) + (p?.clearStateProgram?.length ?? 0);
+  return programOverflow(bytes);
 }
 
 /** The extra program pages an app declares today. See `appParams`. */

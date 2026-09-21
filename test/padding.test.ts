@@ -134,18 +134,20 @@ test('a swap never names app 0 as a foreign app, whatever the padding', () => {
 
 const untilOversized = { skip: MAX_PROGRAM_OVERFLOW === 0 && 'no bundled build is over the legacy cap yet' };
 
-test('with an oversized build bundled: no-box calls carry three empty references', untilOversized, () => {
+test('with an oversized build bundled: no-box calls carry two empty references', untilOversized, () => {
   for (const [name, build, expectReal] of SINGLES) {
     if (expectReal !== 0) continue;
     const t = build();
-    assert.equal(empties(t).length, 3, name);
-    assert.equal(boxesOf(t).length, 3, name);
+    assert.equal(empties(t).length, 2, name);
+    assert.equal(boxesOf(t).length, 2, name);
   }
 });
 
-test('with an oversized build bundled: one-box calls carry two empties, three-box calls none', untilOversized, () => {
-  assert.equal(empties(manage.optIn(ctx, 10)).length, 2);
-  assert.equal(empties(manage.withdraw(ctx, { asset: 10, amount: 1n })).length, 2);
+test('with an oversized build bundled: one-box calls carry one empty, two-box calls none', untilOversized, () => {
+  // At 2,048 a reference a 2,400-byte draw takes two references, however they
+  // are made up — so a call already naming two real boxes pads nothing.
+  assert.equal(empties(manage.optIn(ctx, 10)).length, 1);
+  assert.equal(empties(manage.withdraw(ctx, { asset: 10, amount: 1n })).length, 1);
   assert.equal(empties(manage.lock(ctx, { asset: 10, amount: 1n })).length, 0);
 });
 
@@ -158,6 +160,6 @@ test('with an oversized build bundled: a swap with one real box pads and still e
   });
   const g = swap.swapGroup(ctx, { assetIn: 0, spend: 1n, assetOut: 10, minOut: 1n, session: [leg], routerApp: 999 });
   const total = g.reduce((n, t) => n + boxesOf(t).length, 0);
-  assert.ok(total >= 3, `group names ${total} box references`);
+  assert.ok(total >= 2, `group names ${total} box references`);
   for (const t of g) assert.doesNotThrow(() => algosdk.encodeUnsignedTransaction(t));
 });

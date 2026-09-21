@@ -1,5 +1,6 @@
 /** Custody, wiring and positions — everything the owner does outside strategies. */
 import {
+  assignGroupID,
   makeApplicationNoOpTxnFromObject,
   type BoxReference,
   type Transaction,
@@ -10,7 +11,7 @@ import { abiBytes, boxName, concat, u64 } from './encode.js';
 import { flat } from './create.js';
 import { padBoxes } from './pages.js';
 import { MAX_PROGRAM_OVERFLOW } from './programs.js';
-import type { Num, PassportCtx } from './types.js';
+import type { Num, PassportCtx, Group } from './types.js';
 import { arc2 } from './note.js';
 
 function call(
@@ -233,6 +234,34 @@ export function syncContracts(
  * the call is rejected as an unknown method — check `read.gasCap().supported`
  * before putting the control in front of an owner.
  */
+/**
+ * Adopt a directory and take its contracts in ONE signature.
+ *
+ * `set_directory` then `sync_contracts`, grouped, which is the whole of a
+ * router migration from the owner's side: the passport caches the new router and
+ * budget, and every later crank and owner swap uses them. The passport contract
+ * itself does not change.
+ *
+ * THE IDS MUST COME FROM THE DIRECTORY BEING ADOPTED, not the one the passport
+ * caches now. `sync_contracts` names all three as foreign apps because the
+ * passport resolves each app's ADDRESS to prove it exists, and resolving the new
+ * router through the old directory would name the app it is replacing —
+ * `unavailable App`, which reads like a contract fault and is not.
+ *
+ *   const d = await directory.resolve(algod, DIRECTORY);
+ *   const group = manage.switchDirectory(ctx, { directory: DIRECTORY, ...d });
+ *
+ * Order matters and the group enforces it: the sync reads the directory the
+ * first transaction just set. Offer it only when `directory.pendingContracts`
+ * says the published ids differ from the cached ones.
+ */
+export function switchDirectory(
+  ctx: PassportCtx,
+  a: { directory: Num; router: Num; budget: Num },
+): Group {
+  return assignGroupID([setDirectory(ctx, a.directory), syncContracts(ctx, a)]);
+}
+
 export function setGasCap(ctx: PassportCtx, txns: Num): Transaction {
   if (BigInt(txns) > BigInt(GAS_CAP_MAX)) {
     throw new RangeError(

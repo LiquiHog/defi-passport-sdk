@@ -15,7 +15,7 @@
  */
 import type { Algodv2 } from 'algosdk';
 import { encodeAddress } from 'algosdk';
-import { globals } from './read.js';
+import { globals, passportState } from './read.js';
 import type { DirectoryEntries, Num } from './types.js';
 
 export interface ResolveOptions {
@@ -85,6 +85,40 @@ export async function resolve(
   );
   cache.set(String(directory), out);
   return out;
+}
+
+/**
+ * What a passport would GAIN by adopting this directory: the published ids
+ * beside the ones it caches now, and whether they differ.
+ *
+ * The UI question this answers is "should we offer the switch at all". A
+ * passport keeps using its cached router until its owner accepts a new one, so
+ * a directory that publishes something new is an offer, never an event: show
+ * the switch when `changed` is true, and nothing when it is false.
+ *
+ * Reads both sides live, because either can move: the platform publishes, and
+ * another session may already have accepted.
+ */
+export async function pendingContracts(
+  algod: Algodv2,
+  passport: Num,
+  directory: Num,
+): Promise<{
+  cached: { router: bigint; budget: bigint };
+  published: { router: bigint; budget: bigint };
+  changed: boolean;
+}> {
+  const [st, pub] = await Promise.all([
+    passportState(algod, passport),
+    resolve(algod, directory),
+  ]);
+  const cached = { router: st.routerAppId, budget: st.budgetAppId };
+  const published = { router: pub.router, budget: pub.budget };
+  return {
+    cached,
+    published,
+    changed: published.router !== cached.router || published.budget !== cached.budget,
+  };
 }
 
 /** The cached copy, if `resolve` has run for this directory in this process. */

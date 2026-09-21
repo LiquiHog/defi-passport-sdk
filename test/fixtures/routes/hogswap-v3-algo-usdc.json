@@ -1,0 +1,62 @@
+{
+  "name": "hogswap-v3-algo-usdc",
+  "routerApp": "3687031461",
+  "assetIn": "0",
+  "assetOut": "31566704",
+  "asBuilt": {
+    "sdk": "0.6.0",
+    "strict": "clean",
+    "missing": {
+      "holdings": [],
+      "locals": []
+    }
+  },
+  "session": [
+    {
+      "type": "pay",
+      "fee": 1000,
+      "receiver": "3YE4E2HHDKJZDJ4TT6KYLYEDM4RGH7T2GQ7UXD2Y3VDIQ5MVRL2UUKFY6M"
+    },
+    {
+      "type": "appl",
+      "fee": 1000,
+      "app": "3687031461",
+      "accounts": [],
+      "apps": [
+        "3544641019"
+      ],
+      "assets": [
+        "3178895177"
+      ],
+      "boxes": [
+        {
+          "app": "0",
+          "name": "c2I="
+        },
+        {
+          "app": "0",
+          "name": "cGFk"
+        }
+      ]
+    },
+    {
+      "type": "appl",
+      "fee": 11000,
+      "app": "3687031461",
+      "accounts": [
+        "DQYGJXDLHD6JQV4ETZVS53XCFQY7SQWBNHE5ORANJFZDVQVMNV7LFFKVFQ",
+        "WVSV2HZO5KZ6RBFMN2N6XQOQZUFBFA7DGQJJZ5WSUQBIZYDCG4JALLUG5Y"
+      ],
+      "apps": [
+        "1075409914",
+        "2757544466"
+      ],
+      "assets": [
+        "0",
+        "31566704",
+        "452399768"
+      ],
+      "boxes": []
+    }
+  ]
+}

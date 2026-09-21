@@ -378,6 +378,21 @@ export interface SwapArgs {
    * blob built for a router it has not adopted fails with "app not allowlisted".
    */
   routerApp: Num;
+  /**
+   * Read budget this group must buy for apps OTHER than the passport, in bytes
+   * — in practice the router's, from `read.programDraw(algod, routerApp)`.
+   *
+   * A group pays the draw of every oversized app it NAMES, and a swap names its
+   * router whether or not the router is the app being called. The passport's own
+   * draw is known here because this SDK bundles its bytes; a router's is not,
+   * because it is upgraded in place by someone else — so it is an input, cached
+   * by the caller, rather than a constant that goes stale.
+   *
+   * Leave it unset for a router under the legacy cap, which draws nothing. Set
+   * wrongly low, the group fails with "read budget exceeded", which names
+   * nothing about the route; the SDK cannot detect that offline.
+   */
+  extraDraw?: Num;
 }
 
 /**
@@ -401,8 +416,9 @@ export function swapGroup(ctx: PassportCtx, a: SwapArgs): Group {
       a.session,
       res,
       // Padded as a set: the group is budgeted as a whole, and the layout puts
-      // any empties wherever there is room.
-      padBoxes(res.boxes, MAX_PROGRAM_OVERFLOW),
+      // any empties wherever there is room. Draws ADD UP, so the passport's own
+      // program and the router's are paid for together.
+      padBoxes(res.boxes, MAX_PROGRAM_OVERFLOW + Number(a.extraDraw ?? 0)),
       BigInt(a.routerApp),
       BigInt(ctx.passport),
     ),

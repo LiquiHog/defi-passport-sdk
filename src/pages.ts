@@ -78,10 +78,21 @@ export function programOverflow(bytes: Num): number {
 /**
  * How many box references a group that touches the app must carry.
  *
- * `ceil((overflow + bound * boxes) / 1024)`, with every named box counted at
- * `BOX_READ_BOUND` bytes — a bound, not a measurement, so a rule box that grows
- * cannot quietly push a group under budget. Real references count, wherever
- * they point: a registry box named in the same group buys budget too.
+ * `ceil((overflow + bound * boxes) / READ_BUDGET_PER_BOX_REF)`, with every named
+ * box counted at `BOX_READ_BOUND` bytes — a bound, not a measurement, so a rule
+ * box that grows cannot quietly push a group under budget. Real references count,
+ * wherever they point: a registry box named in the same group buys budget too.
+ *
+ * DRAWS ADD UP, AND THE BUDGET IS POOLED ACROSS THE GROUP. Both measured on
+ * mainnet: one transaction calling a passport (2,400) while naming a second
+ * oversized app (3,307) refuses at `5707 > 4096` with two references and passes
+ * with three; and a passport call carrying no references of its own passes when
+ * another transaction in the group carries enough. So `overflow` is the sum of
+ * every oversized app the GROUP names, and padding may sit anywhere in it.
+ *
+ * MERELY NAMING AN APP CHARGES ITS DRAW — calling it is not required, which is
+ * why a swap group pays for its router whether or not that router is the app
+ * being called.
  */
 export function boxRefsNeeded(overflow: Num, boxes: number): number {
   return Math.ceil((Number(overflow) + BOX_READ_BOUND * boxes) / READ_BUDGET_PER_BOX_REF);

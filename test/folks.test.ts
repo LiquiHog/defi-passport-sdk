@@ -163,11 +163,11 @@ test('openLoan refuses a loan app the contract does not accept, naming the six i
 
 // ── folks_close ─────────────────────────────────────────────────────────────
 
-test('folksClose: s and fl plus one empty, escrow and loan app referenced, fee 6000', () => {
+test('folksClose: s and fl, escrow and loan app referenced, fee 6000', () => {
   const t = folks.folksClose(ctx, { sid: 7, escrow: ESCROW, loanApp: GENERAL });
   assert.equal(args(t)[0], hex(abi.PASSPORT.folks_close.getSelector()));
   assert.deepEqual(realNames(t), [S(7), FL(7)].sort());
-  assert.equal(empties(t), 1, 'two real boxes need one empty to reach the budget');
+  assert.equal(empties(t), 0, 'two real boxes already meet the budget');
   assert.deepEqual((t.applicationCall?.accounts ?? []).map(String), [ESCROW]);
   assert.deepEqual((t.applicationCall?.foreignApps ?? []).map(Number), [GENERAL]);
   assert.equal(Number(t.fee), FOLKS_CLOSE_FEE);

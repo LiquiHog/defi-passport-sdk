@@ -15,11 +15,12 @@
  *   passport + swaps    each route built by swapGroup from a saved session and
  *                       strict-simulated: every resource named where it is needed
  *
- * A swap's session is a file you saved from a router quote (see loadSession in
- * lib/checks.mjs for the formats). Quotes expire; simulate does not care, but a
- * stale price can stop the swap at "below min_out" — reported, not failed, since
- * it says nothing about the group this SDK built. Fetching a fresh quote from the
- * router (`quote.url`) is not supported yet.
+ * A swap route comes from one of two places: a `session` file you saved from a
+ * router quote (see loadSession in lib/checks.mjs for the formats), or a live
+ * quote, by setting `quote.url` and giving the route a `quote` object of that
+ * router's own parameters, which are sent verbatim. A saved quote expires;
+ * simulate does not care, but a stale price can stop the swap at "below min_out"
+ * — reported, not failed, since it says nothing about the group this SDK built.
  *
  * Nothing here signs or submits, and a config holding anything that looks like a
  * key is refused.
@@ -92,20 +93,17 @@ if (set(config.passport)) {
   await step('upgrade rehearsal', () => rehearseUpgrade(algod, r, config.passport));
 
   for (const route of config.swaps ?? []) {
-    if (!set(route.session)) {
-      r.note(`swap ${route.name ?? ''}: no session file set — skipped`);
+    const quoteUrl = config.quote?.url;
+    if (!set(route.session) && !(route.quote && set(quoteUrl))) {
+      r.note(`swap ${route.name ?? ''}: needs a saved session, or quote.url plus quote parameters — skipped`);
       continue;
     }
     await step(`swap ${route.name ?? ''}`, () =>
-      checkSwap(algod, r, { passport: config.passport, route, dir, saveDir, sdkVersion }),
+      checkSwap(algod, r, { passport: config.passport, route, dir, saveDir, sdkVersion, quoteUrl }),
     );
   }
 } else if ((config.swaps ?? []).length) {
   r.note('swaps are configured but no passport is: a swap is checked from a passport');
-}
-
-if (set(config.quote?.url)) {
-  r.note('quote.url is set, but fetching a fresh quote is not supported yet — use a saved session');
 }
 
 finish(r);

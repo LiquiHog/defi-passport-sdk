@@ -53,16 +53,26 @@ test('programOverflow: bytes past the legacy cap, and never negative', () => {
   assert.equal(programBytes({ approval: new Uint8Array(10_588), clear: new Uint8Array(4) }), V112);
 });
 
-test('boxRefsNeeded reproduces the contract team\'s sizing table for v1.1.2', () => {
-  // "calls that name no boxes need three empty box references; calls naming one
-  // or two small boxes need empties added up to three; calls that already name
-  // three or more need nothing extra"
+test('boxRefsNeeded follows the budget the node actually charges: 2,048 a reference', () => {
+  // MEASURED, NOT ASSUMED. A live v1.1.2 passport (draw 2,400) refuses with
+  // "read budget exceeded (2400 > 2048)" at one reference and passes at two.
+  // The table the contract team wrote against the original 1,024-byte budget
+  // said three — right then, one wasted reference now, and in a swap that
+  // reference competes with the route's own.
   assert.deepEqual(
     [0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => boxRefsNeeded(2_400, n)),
-    [3, 3, 3, 3, 3, 3, 4, 4, 4],
+    [2, 2, 2, 2, 2, 2, 2, 2, 2],
   );
-  // and "nothing extra" holds because from three boxes up, need <= have
-  for (let n = 3; n <= 16; n++) assert.ok(boxRefsNeeded(2_400, n) <= n, `n=${n}`);
+  // and "nothing extra" now holds from TWO boxes up, because need <= have there
+  for (let n = 2; n <= 16; n++) assert.ok(boxRefsNeeded(2_400, n) <= n, `n=${n}`);
+});
+
+test('the draws of several apps add up, and a reference covers 2,048 of the total', () => {
+  // A swap group names its passport AND its router. Mainnet charged 5,707 for
+  // exactly that pair (2,400 + 3,307): two references refused with
+  // "read budget exceeded (5707 > 4096)", three passed.
+  assert.equal(boxRefsNeeded(2_400 + 3_307, 0), 3);
+  assert.equal(boxRefsNeeded(3_307, 0), 2);
 });
 
 test('boxRefsNeeded is a no-op for a program under the cap', () => {
@@ -73,10 +83,10 @@ test('boxRefsNeeded is a no-op for a program under the cap', () => {
 
 test('padBoxes adds empties up to the need and never removes a real reference', () => {
   const real = { appIndex: 555n, name: new Uint8Array([0x63, 0x6d]) };
-  assert.equal(padBoxes([], 2_400).length, 3);
+  assert.equal(padBoxes([], 2_400).length, 2);
   assert.deepEqual(padBoxes([real], 2_400).slice(0, 1), [real]);
-  assert.equal(padBoxes([real], 2_400).length, 3);
-  assert.deepEqual(padBoxes([real, real, real], 2_400), [real, real, real], 'three real boxes: untouched');
+  assert.equal(padBoxes([real], 2_400).length, 2);
+  assert.deepEqual(padBoxes([real, real], 2_400), [real, real], 'two real boxes: untouched');
   assert.deepEqual(padBoxes([real], 0), [real], 'under the cap: untouched');
   assert.deepEqual(padBoxes([], 0), []);
 });
@@ -100,8 +110,8 @@ test('padding each member separately is always enough for the group', () => {
 
 test('groupPadding counts real references across the group', () => {
   assert.equal(groupPadding([2, 2], 2_400), 0, 'four real across two members');
-  assert.equal(groupPadding([1], 2_400), 2);
-  assert.equal(groupPadding([0, 0], 2_400), 3);
+  assert.equal(groupPadding([1], 2_400), 1);
+  assert.equal(groupPadding([0, 0], 2_400), 2);
   assert.equal(groupPadding([4, 3, 1], 2_400), 0);
   assert.equal(groupPadding([0], 0), 0);
 });

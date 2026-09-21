@@ -7,10 +7,13 @@
     "",
     "registry: a registry app id. With owner, also checks that address's entitlement.",
     "passport: your passport app id. Checks its state and simulates its upgrade.",
-    "swaps: routes to build and strict-simulate from your passport. `session` is a",
-    "  saved router session (a JSON array of base64 msgpack transactions), relative",
-    "  to this file. `npm run check -- --save` writes captures/ for route fixtures.",
-    "quote.url: reserved for fetching fresh quotes; not supported yet.",
+    "swaps: routes to build and strict-simulate from your passport. Give each one",
+    "  either `session` — a saved router session (a JSON array of base64 msgpack",
+    "  transactions), relative to this file — or a `quote` object, which is sent to",
+    "  quote.url verbatim, so your router's own parameter names apply. The passport's",
+    "  application address is added as the sender. `npm run check -- --save` writes",
+    "  captures/ for route fixtures.",
+    "quote.url: the router API base, which serves POST /quote and POST /execute.",
     "maintainer.registries: what `npm run live-check` runs against when given no ids",
     "  ({ id, expect: line|major, label?, note? }). Defaults to the production registry."
   ],
@@ -20,12 +23,18 @@
   "passport": 0,
   "swaps": [
     {
-      "name": "example-route",
+      "name": "saved-session-route",
       "assetIn": 0,
       "assetOut": 0,
       "spend": 0,
       "minOut": 1,
       "session": ""
+    },
+    {
+      "name": "live-quote-route",
+      "assetIn": 0,
+      "assetOut": 0,
+      "quote": { "asset_in": 0, "asset_out": 0, "amount_in": 0, "slippage_bps": 50 }
     }
   ],
   "quote": { "url": "" },

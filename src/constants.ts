@@ -65,8 +65,20 @@ export const OVERSIZED_PROGRAM_FEE = 2000;
  */
 export const MBR_PER_EXTRA_PAGE = 100_000;
 
-/** Read budget one box reference buys. */
-export const READ_BUDGET_PER_BOX_REF = 1024;
+/**
+ * Read budget one box reference buys.
+ *
+ * 2,048, not the 1,024 of the original box specification. Measured on mainnet
+ * rather than read from a changelog: a v1.1.2 passport (10,588 + 4 bytes, so a
+ * draw of 2,400 over the legacy cap) refuses with `read budget exceeded
+ * (2400 > 2048)` when one reference is named, and passes with two.
+ *
+ * Under-stating it is not a safe default. Every builder pads to this, so half
+ * the true figure means every call carries a reference it does not need — and in
+ * a swap the wasted slot competes with the route's own references, which is
+ * where a group runs out of room.
+ */
+export const READ_BUDGET_PER_BOX_REF = 2048;
 
 /**
  * The size every named box is counted at when sizing a group's read budget. A

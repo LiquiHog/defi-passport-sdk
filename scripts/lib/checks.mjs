@@ -19,6 +19,7 @@ import {
   upgradeGroup,
   version as version_,
 } from '../../dist/index.js';
+import { fetchFittingSession } from './quote.mjs';
 
 // ── reporting ───────────────────────────────────────────────────────────────
 
@@ -405,11 +406,47 @@ async function unnamedResources(algod, group) {
  * With `saveDir`, writes a CAPTURE — session, group as built, both simulates —
  * which `scripts/route-fixture.mjs` turns into an anonymized test fixture.
  */
-export async function checkSwap(algod, r, { passport, route, dir, saveDir, sdkVersion }) {
+export async function checkSwap(algod, r, { passport, route, dir, saveDir, sdkVersion, quoteUrl }) {
   const name = route.name ?? `${route.assetIn}-${route.assetOut}`;
   header(`SWAP ${name}  passport ${passport}`);
   const st = await read.passportState(algod, BigInt(passport));
-  const session = loadSession(path.resolve(dir, route.session));
+
+  // A saved session, or a fresh quote. The quote's own minimum output is used AS
+  // GIVEN — the router checks it against its expected output, so scaling it here
+  // turns a live route into a rejected one.
+  let session;
+  let minOut = BigInt(route.minOut ?? 1);
+  let spend = route.spend;
+  if (route.session) {
+    session = loadSession(path.resolve(dir, route.session));
+  } else {
+    const got = await fetchFittingSession(
+      algosdk,
+      {
+        url: quoteUrl,
+        params: route.quote,
+        sender: algosdk.getApplicationAddress(BigInt(passport)).toString(),
+        ladder: route.ladder,
+      },
+      swap.MAX_SESSION_TXNS,
+      (m) => r.note(m),
+    );
+    session = got.session;
+    if (route.minOut === undefined) minOut = got.minOut;
+    spend = route.spend ?? route.quote.amount_in;
+    const legs = got.quote.legs?.length ?? '?';
+    r.note(`quote ${got.quote.quote_id}: ${legs} legs, expected out ${got.quote.expected_out}, min out ${got.minOut}`);
+    if (got.routerAppId !== undefined && BigInt(got.routerAppId) !== st.routerAppId) {
+      r.check(false, `the API built for router ${got.routerAppId}, but this passport caches ${st.routerAppId} — it would refuse the session as "app not allowlisted"`);
+      return;
+    }
+  }
+
+  // Every oversized app the group NAMES draws read budget, the router included.
+  // Read it rather than assume it: a router is upgraded in place by someone else.
+  const extraDraw = await read.programDraw(algod, st.routerAppId);
+  if (extraDraw) r.note(`router ${st.routerAppId} draws ${extraDraw} B of read budget; the group buys it`);
+
   const ctx = {
     algod,
     registry: st.registry,
@@ -421,11 +458,12 @@ export async function checkSwap(algod, r, { passport, route, dir, saveDir, sdkVe
   try {
     group = swap.swapGroup(ctx, {
       assetIn: BigInt(route.assetIn),
-      spend: BigInt(route.spend),
+      spend: BigInt(spend),
       assetOut: BigInt(route.assetOut),
-      minOut: BigInt(route.minOut ?? 1),
+      minOut,
       session,
       routerApp: st.routerAppId,
+      extraDraw,
     });
   } catch (err) {
     r.fail(`swapGroup refused the route: ${err.message}`);
@@ -448,6 +486,10 @@ export async function checkSwap(algod, r, { passport, route, dir, saveDir, sdkVe
 
   if (strict.ok) {
     r.check(true, 'strict simulate: CLEAN — every resource the route touches is named where it is needed');
+  } else if (strict.readBudget) {
+    const b = strict.readBudget;
+    r.check(false, `strict simulate: read budget short by ${b.refsShort} reference(s) — drew ${b.draw}, bought ${b.have}`);
+    r.note('an app this group names has grown: re-read its draw with read.programDraw and pass it as extraDraw');
   } else if (/unavailable|group fee too small|fee too small/i.test(strict.failure)) {
     r.check(false, `strict simulate: ${first}`);
   } else {

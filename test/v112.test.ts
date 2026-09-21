@@ -8,7 +8,7 @@
  * Both are asserted below so the builders follow the contract, not the memo.
  *
  * Bundling a 10,588-byte program also turned the read-budget padding on by
- * itself: MAX_PROGRAM_OVERFLOW is now 2,400 and every no-box call carries three
+ * itself: MAX_PROGRAM_OVERFLOW is now 2,400 and every no-box call carries two
  * empty references. That is asserted here explicitly rather than only through
  * the derived-constant test, because it is the behaviour beta owners will hit.
  */
@@ -35,11 +35,11 @@ test('bundling v1.1.2 switched the read-budget padding on', () => {
 
 // ── setGasAsset ─────────────────────────────────────────────────────────────
 
-test('setGasAsset encodes the four arguments and names no box — three empties instead', () => {
+test('setGasAsset encodes the four arguments and names no box — two empties instead', () => {
   const t = manage.setGasAsset(ctx, { asset: 123n, maxNum: 3n, maxDen: 2n, expires: FUTURE });
   assert.deepEqual(args(t), [hex(abi.PASSPORT.set_gas_asset.getSelector()), u64hex(123n), u64hex(3n), u64hex(2n), u64hex(FUTURE)]);
   assert.deepEqual(realNames(t), [], 'the contract writes the ga global and reads no box');
-  assert.equal(empties(t), 3);
+  assert.equal(empties(t), 2);
   assert.doesNotThrow(() => algosdk.encodeUnsignedTransaction(t));
 });
 
@@ -70,7 +70,7 @@ test('setProfit none: deletes the routing, naming the header and the sp box', ()
   const t = strategy.setProfit(ctx, { sid: 7, kind: 'none' });
   assert.deepEqual(args(t).slice(1), [u64hex(7n), u64hex(0n), u64hex(0n), u64hex(0n), u64hex(0n)]);
   assert.deepEqual(realNames(t), [S(7), SP(7)].sort());
-  assert.equal(empties(t), 1, 'two real boxes need one empty to reach the budget');
+  assert.equal(empties(t), 0, 'two real boxes already meet the budget');
 });
 
 test('setProfit to the owner: rate in bps, and cm+0 for the free-balance check', () => {

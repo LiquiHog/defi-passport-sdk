@@ -220,9 +220,22 @@ The other two are automatic. The one transaction carrying an oversized program
 pays a surcharge, and — the part that is not intuitive — **every later call to
 the app needs box references, box or no box**. The AVM charges a read budget
 against the old cap for every app whatever its page count, and only box
-references buy it back. Every builder here pads with empty references sized from
-the largest bundled build; if you assemble raw transactions yourself, see
-`pages.boxRefsNeeded`.
+references buy it back, 2,048 bytes each. Every builder here pads with empty
+references sized from the largest bundled build; if you assemble raw
+transactions yourself, see `pages.boxRefsNeeded`.
+
+Three things about that budget are worth knowing, because each produces a
+failure that names nothing useful (`read budget exceeded (draw > have)`):
+
+- **Every oversized app the group NAMES is charged**, whether or not it is
+  called. A swap names its router, so a router over the cap costs the group
+  references of its own — pass `read.programDraw(algod, routerApp)` to
+  `swapGroup` as `extraDraw`. Read it rather than hard-code it: a router is
+  upgraded in place, and its size changes without notice.
+- **Draws add up, and the budget is pooled across the group**, so padding may
+  sit on any transaction in it.
+- **The node hands back both numbers**, and `simulate.readBudget` turns them
+  into the references you are short, which is the durable fix when an app grows.
 
 ## Folks lending
 
@@ -343,6 +356,28 @@ const live = await directory.resolve(algod, DIRECTORY_APP_ID);
 Entries that are not published yet come back as `0` — or the zero address — rather
 than throwing, so check the one you need before relying on it.
 
+### Switching to new contracts
+
+A passport keeps using the router and budget it has cached until its owner
+accepts new ones, so a directory publishing something newer is an OFFER, never
+an event. `directory.pendingContracts` compares the two sides, and
+`manage.switchDirectory` is the acceptance — `set_directory` and
+`sync_contracts` grouped, so it is one signature and the sync cannot read the
+old directory.
+
+```ts
+const pending = await directory.pendingContracts(algod, passportId, DIRECTORY_APP_ID);
+if (pending.changed) {
+  const d = await directory.resolve(algod, DIRECTORY_APP_ID);
+  const group = manage.switchDirectory(ctx, { directory: DIRECTORY_APP_ID, ...d });
+}
+```
+
+The ids must be the NEW directory's: the passport resolves each app's address to
+prove it exists, and naming the one being replaced fails as `unavailable App`.
+The passport contract itself does not change — every later crank and owner swap
+simply uses the new router.
+
 ## Testing
 
 Two tiers, and neither ever signs anything.
@@ -385,13 +420,18 @@ fill in what you want checked. Every section is optional:
 | `registry` | its live state: globals, pinned program, each cohort's version, bundled bytes for every version it serves |
 | `registry` + `owner` | what that address is entitled to, and whether this SDK carries the bytes |
 | `passport` | its state, and its upgrade built as a front end would and simulated |
-| `passport` + `swaps` | each saved router session built by `swapGroup` and strict-simulated |
+| `passport` + `swaps` | each route — a saved session or a live quote — built by `swapGroup` and strict-simulated |
 
-A config holding anything that looks like a key or mnemonic is refused. A swap
-that stops on a stale price or on too little free balance is reported, not
-failed, because neither says anything about the group this SDK built. Fetching
-a fresh quote from the router isn't supported yet (`quote.url` is reserved), so
-save the session your front end already received.
+A route comes from either a saved session or a live quote: set `quote.url` to
+your router's API base and give the route a `quote` object, which is sent
+verbatim, so that router's own parameter names apply and the passport's
+application address is added as the sender. Quotes are fetched one at a time on
+purpose: a router's origin may allow only a few route computations in flight per
+IP and refuse the rest rather than queue them, and naming a sender skips its
+anonymous quote cache, so each one is real work at the other end. A config holding anything that looks
+like a key or mnemonic is refused. A swap that stops on a stale price or on too
+little free balance is reported, not failed, because neither says anything about
+the group this SDK built.
 
 `npm run live-check` is the same registry check run against several registries at
 once: the ones you pass as arguments, or `maintainer.registries` from the config,
